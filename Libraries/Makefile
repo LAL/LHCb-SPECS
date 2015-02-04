@@ -1,8 +1,8 @@
 # Makefile template for shared library
 
 CC = gcc # C compiler
-CXXFLAGS = -DPLX_LINUX -DSPECS_EXPORTS -fPIC -I/group/online/ecs/Specs/include
-CFLAGS = -g -fPIC -I/group/online/ecs/Specs/include # C flags
+CXXFLAGS = -DPLX_LINUX -DSPECS_EXPORTS -fPIC -I../Driver/src -I.
+CFLAGS = -g -fPIC -I../Driver/src -I. # C flags
 LDFLAGS = -shared -fPIC # linking flags
 RM = rm -f # rm command
 
