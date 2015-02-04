@@ -1,6 +1,6 @@
 GPP = g++
 CXX = gcc
-SPECSUSER_INC = -I/group/online/ecs/Specs/include
+SPECSUSER_INC = -I../Libraries -I../Driver/src
 CPPFLAGS = -c -DPCI_CODE -DPLX_LINUX -DPLX_LITTLE_ENDIAN -Wall -pipe
 APP_CPPFLAGS = -DGCC -Wno-write-strings
 OUTPUT_OPTION = -o $@
@@ -13,7 +13,7 @@ OUTPUT_OPTION = -o $@
 testMezza.exe: MainProgram.o TestCommands.o
 	@echo
 	@echo Linking application: $@
-	@$(GPP) -o $@ $^ -lpthread -L/group/online/ecs/Specs/libraries -lspecs -lSpecsUser
+	@$(GPP) -o $@ $^ -lpthread -L../Libraries -lSpecs -lSpecsUser
 	@echo
 	@echo
 	@echo Executable $@ built successfully

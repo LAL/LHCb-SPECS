@@ -9,9 +9,6 @@
 #include <cstdlib>
 #include <cstdio>
 
-
-#include "Reg9030.h"
-
 #ifdef WIN32
 #include "time.h"
 #else

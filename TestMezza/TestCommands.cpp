@@ -4,7 +4,6 @@
 // local
 #include "TestCommands.h"
 #include <iostream>
-#include "Reg9030.h"
 #include <cstdio>
 #include <cstdlib>
 #include <unistd.h>
