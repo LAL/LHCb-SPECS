@@ -1,0 +1,4 @@
+*.ko
+*.ko.*
+modules.order
+*.o.cmd
