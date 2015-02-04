@@ -1,0 +1,38 @@
+#!/bin/bash 
+module="AltSpecsV2"
+device="AltSpecsV2"
+mode="664"
+/sbin/rmmod $module
+# invoke insmod with all arguments we got
+# and use a pathname, as newer modutils don't look in . by default
+echo "module enleve"
+sleep 1
+/sbin/insmod ./$module.ko $* || exit 1# remove stale nodes
+rm -f /dev/${device}Master*
+
+
+i=0
+cat </proc/devices | while true
+do
+	read ligne
+	if [ "$ligne" = "" ]; then break; fi
+	val=` echo ${ligne}| grep AltSpecsV2 | awk '{print $1}' `
+        if [ "$val" ]	
+	then
+		if [ $val -gt 0 ]  	
+		then
+		for nombre in 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 
+		do
+                mknod /dev/${device}Master$nombre c ${val} $i 
+		let "i=	$i + 1"
+		done
+	fi
+  fi
+  done
+  # give appropriate group/permissions, and change the group.
+  group="lhcb"
+
+  chgrp $group /dev/${device}Master[0-16]
+  chmod $mode  /dev/${device}Master[0-16]
+
+
