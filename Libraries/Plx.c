@@ -7,7 +7,6 @@
 #include <fcntl.h>
 #include <sys/ioctl.h>
 #include "AltSpecsV2.h"
-#include "ConsoleUtilities.h"
 #include "Plx.h" 
 #include <sys/time.h>
 
