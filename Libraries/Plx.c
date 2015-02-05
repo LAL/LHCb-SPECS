@@ -1,6 +1,4 @@
 #include <stdarg.h>            // For va_start/va_end
-//#include "PlxError.h"
-//#include "PlxTypes.h"
 #include "linux/pci.h"
 #include <stdio.h>
 #include <errno.h>
@@ -9,6 +7,7 @@
 #include <fcntl.h>
 #include <sys/ioctl.h>
 #include "AltSpecsV2.h"
+#include "ConsoleUtilities.h"
 #include "Plx.h" 
 #include <sys/time.h>
 
@@ -19,8 +18,8 @@
  *
  */
 struct timeval Heure_depart;
-  struct timeval Heure_fin;
-  struct timezone Tz;
+struct timeval Heure_fin;
+struct timezone Tz;
 static long long nbOctets=0;
 double Time=0;
 
@@ -46,17 +45,17 @@ double DiffTime(struct timeval *heure_depart,struct  timeval *heure_fin)
     {
       //    printf(" %ld.%06ld \n ",heure_fin->tv_sec-heure_depart->tv_sec,heure_fin->tv_usec-heure_depart->tv_usec);
       val=(double)( heure_fin->tv_sec-heure_depart->tv_sec)+(double)((double)(heure_fin->tv_usec-heure_depart->tv_usec)/1000000.0)
-;
+	;
     }
  
- return(val);
+  return(val);
 }
 
 RETURN_CODE PlxPciDeviceClose(  HANDLE Handle ,U8 masterId   )
 { int err;
 
   if (Handle == -1) 
-   {
+    {
       printf(" Master %d handle NULL \n",masterId);
       return ApiInvalidDeviceInfo;
     }
@@ -70,7 +69,7 @@ RETURN_CODE PlxPciDeviceClose(  HANDLE Handle ,U8 masterId   )
   gettimeofday(&Heure_fin,&Tz);
   Time = DiffTime(&Heure_depart,&Heure_fin);
   nbOctets*=4;  // se sont des mots de 32 bits
-  printf(" >>> Time = %lf nbOctect %ld   Debit obtenu %lf Mo/s\n",
+  printf(" >>> Time = %lf nbOctect %lld   Debit obtenu %lf Mo/s\n",
 	 Time,nbOctets ,(double)(nbOctets)  /(double)(Time*1000000.0));
  
   err= close(Handle);
@@ -139,9 +138,6 @@ RETURN_CODE  PlxPciDeviceOpen(  DEVICE_LOCATION *pDevice,
 				HANDLE          *pHandle,
 				U8               masterId)
 {
-  U8         VerMajor;
-  U8         VerMinor;
-  U8         VerRevision;
   RETURN_CODE rc =ApiNullParam;
   U32  pNumberDevice;
   char DeviceName[256];
@@ -161,7 +157,7 @@ RETURN_CODE  PlxPciDeviceOpen(  DEVICE_LOCATION *pDevice,
     }
   for ( i= 0 ; i < pNumberDevice ; i++)
     {
-      sprintf(  DeviceName, "/dev/AltSpecsV2Master0",masterId);
+      sprintf(  DeviceName, "/dev/AltSpecsV2Master0");
      
       *pHandle = open(DeviceName, O_RDWR);
       
@@ -194,8 +190,8 @@ RETURN_CODE  PlxPciDeviceOpen(  DEVICE_LOCATION *pDevice,
 	  close(*pHandle);
 	  return ApiInvalidDeviceInfo;
 	} 
-       nbOctets=0;
-       gettimeofday(&Heure_depart,&Tz); 
+      nbOctets=0;
+      gettimeofday(&Heure_depart,&Tz); 
 
      
       if (!rc) return ApiSuccess;
@@ -207,8 +203,8 @@ RETURN_CODE  PlxPciDeviceOpen(  DEVICE_LOCATION *pDevice,
 
 /**
  * @details  read data from the drivers at differents address ( registers)
-  a specific action is made on the FIFO_RECEPTION_IN register we need to know how many bytes are 
-  * realy present in the FIFO 
+ a specific action is made on the FIFO_RECEPTION_IN register we need to know how many bytes are 
+ * realy present in the FIFO 
  * make an important function: the reset of the FIFOs to make empty the 2 FIFOs
  * @param   DEVICE_LOCATION *pDevice a structure with the Altera VendorId 0x1172 and deviceId 0x5  
  * @param  HANDLE          *pHandle the file description id.
@@ -242,26 +238,26 @@ RETURN_CODE PlxBusIopRead(
   if (  (address & MASK_FIFO_IN )  ==  ( FIFO_RECEPTION_IN & MASK_FIFO_IN) )
     {
       for (i=0;i < 500;i++)
-	
 	{
-	  
 	  rc=ioctl(Handle,IOCTL_READ_FILL_LEVEL,&IoBuffer);
 	  val = (U32*) IoBuffer.Buffer;
-	  //  printf("Fill LEVEL need %d read %d\n",ByteCount,*val);
 	  if(*val <  ByteCount)
 	    {
-	      usleep (50); 
+ 	      usleep (50); 
 	    }
-	  else 
+	  else  {
 	    break;
+	  }
 	  
 	}
-      //     if(*val !=  ByteCount) printf("FIFO pas avec le byteCount attendu %d recu %d\n",ByteCount,*val);
+      // on attendu d'avoir le compte de mot si ce n4'est pas le cas en fin de boucle
+      // on lit uniquement le compte de mot trouve 
 
       if (*val == 0) return ApiInvalidSize ;
       if (*val < IoBuffer.TransferSize) {
         IoBuffer.TransferSize = *val;
-	// TO CHECK PATRICK printf("FIFO pas avec le byteCount attendu %d recu %d\n",ByteCount,*val);   
+	// print enleve suite a la fonction JTAG qui de demande pas le compte de mot exact
+	//   printf("FIFO pas avec le byteCount attendu %d recu %d\n",ByteCount,*val);   
      
       }
       nbOctets += (*val);
@@ -272,7 +268,7 @@ RETURN_CODE PlxBusIopRead(
   if (  (address & MASK_FIFO_IN )  ==  ( FIFO_RECEPTION_IN & MASK_FIFO_IN) )
     {
       
-       rc=ioctl(Handle,IOCTL_BUS_IOP_READ,&IoBuffer);
+      rc=ioctl(Handle,IOCTL_BUS_IOP_READ,&IoBuffer);
       // error=read(Handle,IoBuffer.Buffer, IoBuffer.TransferSize);
     }
   else
@@ -290,7 +286,8 @@ RETURN_CODE PlxBusIopRead(
   
   if (error <0) 
     return ApiNullParam;  
-  else  return ApiSuccess;
+  else 
+    return ApiSuccess;
 }
 RETURN_CODE PlxBusIopWrite( HANDLE       Handle,
 			    int          masterId,
@@ -303,10 +300,9 @@ RETURN_CODE PlxBusIopWrite( HANDLE       Handle,
 			    )
 {
   BUSIOPDATA IoBuffer;
-  RETURN_CODE rc =ApiNullParam;
   U32 *val;
-  int i=0;
- static int error=0;
+  int error=0;
+  int err=0;
   IoBuffer.MasterID     = masterId;
   IoBuffer.Address      = address;
   IoBuffer.bRemap       = bRemap;
@@ -315,16 +311,26 @@ RETURN_CODE PlxBusIopWrite( HANDLE       Handle,
   IoBuffer.Buffer       = pBuffer;
   if (  (address & MASK_FIFO_IN )  ==  ( FIFO_EMISSION_OUT & MASK_FIFO_IN) )
     //  error=write (Handle,pBuffer,ByteCount);
-   error=ioctl(Handle,IOCTL_BUS_IOP_WRITE,&IoBuffer);
+    error=ioctl(Handle,IOCTL_BUS_IOP_WRITE,&IoBuffer);
   else
     error=ioctl(Handle,IOCTL_BUS_IOP_WRITE,&IoBuffer);
   val = (U32*)IoBuffer.Buffer ;
-   if (error > 0 ) 
-     return ApiSuccess;  
-   else {
-     //     printf( "Error IOP %d\n" , error ) ;
-     return ApiInvalidSize; 
-   }
+  if (error > 0 ) 
+    return ApiSuccess;  
+  else 
+    {
+      if (error == -2) 
+	{
+	  printf(" On va reset la FIFO il reste qq dedans \n");
+	  err=ioctl(Handle,IOCTL_RESET,masterId);
+	  if ( err )
+	    {
+	      printf("Reset impossible \n");
+	    } 
+	 
+	}    
+      return ApiInvalidSize; 
+    }
 }
 
 RETURN_CODE PlxIntrEnable(
@@ -336,7 +342,6 @@ RETURN_CODE PlxIntrEnable(
   // les interuptions sont valides au niveau de la config PCI
   
   RETURN_CODE rc =ApiNullParam;
-  U32 *val;
   INTERRUPT_OBJ  pIO_Int;
   // printf(" Validation des IRQ PIO %x \n", Register);
   
@@ -359,7 +364,6 @@ RETURN_CODE PlxIntrDisable(
   // les interuptions sont valides au niveau de la config PCI
   
   RETURN_CODE rc =ApiNullParam;
-  U32 *val;
   INTERRUPT_OBJ pIO_Int;
   pIO_Int.stat_reg=statRegister;
   //printf(" Devalidation des IRQ PIO %x \n", statRegister);
@@ -377,7 +381,7 @@ RETURN_CODE PlxNotificationRegisterFor(
 				       )
 {  
         
-      return ApiSuccess;
+  return ApiSuccess;
     
 }
 
@@ -387,10 +391,6 @@ RETURN_CODE PlxNotificationWait(
 				U64            Timeout_ms
 				)
 {  
-  WAIT_OBJ IoWaitObject;
-  RETURN_CODE rc =ApiNullParam;
-  U32 *val;
-  int err=0;
   
   return ApiSuccess;
 
@@ -405,7 +405,7 @@ RETURN_CODE PlxNotificationCancel(
   
 { 
  
-    return ApiSuccess;
+  return ApiSuccess;
  
 }
 
@@ -444,23 +444,22 @@ int  PlxPciBoardReset (	HANDLE  handle , U8 masterId )
   int err;
 
   err=ioctl(handle,IOCTL_RESET,masterId);
-      if ( err )
-	{
-	  return  ApiInvalidDeviceInfo;
-	} 
-      return ApiSuccess;
+  if ( err )
+    {
+      return  ApiInvalidDeviceInfo;
+    } 
+  return ApiSuccess;
 }
 VOID PlxPciFIFOReset (	HANDLE  handle , U8 masterId )
 {
-  DEVICE_LOCATION pDevice;
   int err=0;
  
   err=ioctl(handle,IOCTL_FIFOS_INIT,masterId);
-      if ( err )
-	{
-	  printf("erreur d'initialisation des FIFOS %d\n",err);
+  if ( err )
+    {
+      printf("erreur d'initialisation des FIFOS %d\n",err);
 
-	} 
+    } 
  
   return ;
 }
@@ -469,7 +468,7 @@ U64 PlxRegisterWrite ( HANDLE busIndex,
 		       U32 registerOffset,
 		       U64 datas)
 {
-   printf("Fonction non implementee car registre %x inconnu \n",registerOffset);
+  printf("Fonction non implementee car registre %x inconnu \n",registerOffset);
   return 0;
   
 }
