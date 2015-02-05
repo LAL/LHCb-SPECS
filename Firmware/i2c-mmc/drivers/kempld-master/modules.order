@@ -1,0 +1,6 @@
+kernel//home/lhcb/Claude/i2c-mmc/drivers/kempld-master/gpio-kempld.ko
+kernel//home/lhcb/Claude/i2c-mmc/drivers/kempld-master/gpio-kempld_now1.ko
+kernel//home/lhcb/Claude/i2c-mmc/drivers/kempld-master/i2c-kempld.ko
+kernel//home/lhcb/Claude/i2c-mmc/drivers/kempld-master/kempld_now1_wdt.ko
+kernel//home/lhcb/Claude/i2c-mmc/drivers/kempld-master/kempld_wdt.ko
+kernel//home/lhcb/Claude/i2c-mmc/drivers/kempld-master/kempld-core.ko

@@ -67,7 +67,7 @@ __attribute__((section(".modinfo"))) =
 
 MODULE_ALIAS("pci:v00001172d00000005sv*sd*bc*sc*i*");
 
-MODULE_INFO(srcversion, "1DB761A600A837D7509561F");
+MODULE_INFO(srcversion, "20CF4E000C89DF4E8911A37");
 
 static const struct rheldata _rheldata __used
 __attribute__((section(".rheldata"))) = {

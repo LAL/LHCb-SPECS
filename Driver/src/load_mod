@@ -1,6 +1,14 @@
 #!/bin/bash 
 module="AltSpecsV2"
 device="AltSpecsV2"
+
+group="onliners"
+
+if [ "$HOSTNAME" == "lbccpc01" ]
+then
+  group="z5"
+fi
+
 mode="664"
 /sbin/rmmod $module
 # invoke insmod with all arguments we got
@@ -30,7 +38,6 @@ do
   fi
   done
   # give appropriate group/permissions, and change the group.
-  group="lhcb"
 
   chgrp $group /dev/${device}Master[0-16]
   chmod $mode  /dev/${device}Master[0-16]
