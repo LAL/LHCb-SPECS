@@ -542,7 +542,7 @@ RETURN_CODE I2cBufferWrite(
     {
       i++;
       while ((i<Taille) & (BufSpecslocal[i] != I2Cmap_head))
-	i++;
+        i++;
       rc = SpecsmasterEmitterFIFOWrite(pSpecsslave->pSpecsmaster,&BufSpecslocal[j],i-j);
       //      if ( rc == ApiInvalidSize ) 
       //	printf( "ICI %d %d\n" , i , Taille ) ;
@@ -1358,12 +1358,12 @@ int TmstoSpecs(unsigned char *BufTms,
 }
 
 RETURN_CODE JtagWriteRead(
-			  SPECSSLAVE * pSpecsslave,
-			  U8 outSelect,
-			  U8 *pDataIn,
-			  U8 *pDataOut,
-			  U32 nBits,
-			  JTAG_OPER oper, int header, int trailler)
+                          SPECSSLAVE * pSpecsslave,
+                          U8 outSelect,
+                          U8 *pDataIn,
+                          U8 *pDataOut,
+                          U32 nBits,
+                          JTAG_OPER oper, int header, int trailler)
 {
   RETURN_CODE rc;
   int sizeBufSpecs;
@@ -1377,27 +1377,27 @@ RETURN_CODE JtagWriteRead(
   if(header)
     {
       if(oper == IRSCAN)
-	nhead = 4;
+        nhead = 4;
       else if(oper == DRSCAN)
-	nhead = 3;
-      // if ( 0 == trailler ) extra = 1 ;
+        nhead = 3;
     }
   else
     {
       if(oper == MOVE)
-	nhead = -1;
+        nhead = -1;
     }
   ntrail = 0;
   if(trailler)
-    {
-      ntrail = 2;
-      extra = 1;
+  {
+    ntrail = 2;
+    extra = 1;
     }
-
+  
   sizeBufSpecs = JtagtoSpecs(pDataIn, BufSpecs, nBits, nhead, ntrail);
-
+  
   if(nhead == -1)
     nhead = 0;
+
   if (sizeBufSpecs == 0) return ApiInvalidSize;
 
   BufSpecs[1] |= pSpecsslave->SpecsslaveAdd << 18;
@@ -1407,9 +1407,14 @@ RETURN_CODE JtagWriteRead(
   BufSpecs[1] |= JTAG_calcNBytes(nBits + nhead + ntrail) << 8;
   BufSpecs[1] |= modJTAG;
   BufSpecs[1] |= (outSelect & 0xF);
+  
+  int expectedSize = 1+((nBits+nhead+ntrail+extra)/4) ;
+
+  if ( expectedSize != (sizeBufSpecs - 2 ) ) 
+    sizeBufSpecs = sizeBufSpecs - 1 ;
 
   rc = SpecsmasterEmitterFIFOWrite(pSpecsslave->pSpecsmaster,
-				   BufSpecs, sizeBufSpecs);
+                                   BufSpecs, sizeBufSpecs);
   SpecsmasterEnableInt ( pSpecsslave-> pSpecsmaster,1);//MTQ
   SpecsmasterStartWrite ( pSpecsslave->pSpecsmaster);
   if ( rc != ApiSuccess )
@@ -1421,7 +1426,7 @@ RETURN_CODE JtagWriteRead(
     }
 
   rc = SpecsmasterReceiverFIFORead(pSpecsslave->pSpecsmaster,
-				   bufSpecsOut, sizeBufSpecs);
+                                   bufSpecsOut, sizeBufSpecs);
   if ( rc != ApiSuccess )
     return rc ;
 
@@ -1457,10 +1462,10 @@ int JtagtoSpecs(U8 *bufJtag, U32 *bufSpecs, int nBits, int nHead, int nTrail)
       bufPtr[JTAG_byteIndex(index)] = tmp_bit;
       index++;
       if(nHead == 4)
-	{
-	  bufPtr[JTAG_byteIndex(index)] = TMS1;
-	  index++;
-	}
+      {
+        bufPtr[JTAG_byteIndex(index)] = TMS1;
+        index++;
+      }
       bufPtr[JTAG_byteIndex(index)] = TMS1;
       index++;
       bufPtr[JTAG_byteIndex(index)] = TMS0;
@@ -1479,36 +1484,36 @@ int JtagtoSpecs(U8 *bufJtag, U32 *bufSpecs, int nBits, int nHead, int nTrail)
   nBytes = JTAG_calcNBytes(nBits);
   
   for(i = nBytes; i > 0; i--)
+  {
+    tmp = bufJtag[i-1];
+    j = 0;
+    n = 8;
+    if( i == nBytes)
     {
-      tmp = bufJtag[i-1];
-      j = 0;
-      n = 8;
-      if( i == nBytes)
-	{
-	  nBitsLeft = JTAG_bitsLeft(nBits);
-	  j = 8 - nBitsLeft;
-	  n = nBitsLeft + j;
-	}
-      for(; j < n; j++)
-	{
-	  bufPtr[JTAG_byteIndex(index)] =
-	    tmp & (0x1 << j) ? bit : 0x80;
-	  index++;
-	}
+      nBitsLeft = JTAG_bitsLeft(nBits);
+      j = 8 - nBitsLeft;
+      n = nBitsLeft + j;
     }
+    for(; j < n; j++)
+    {
+      bufPtr[JTAG_byteIndex(index)] =
+        tmp & (0x1 << j) ? bit : 0x80;
+      index++;
+    }
+  }
   if(nTrail)
-    {
-      bufPtr[JTAG_byteIndex(index - 1)] |= 0x22;
-      bufPtr[JTAG_byteIndex(index)] = TMS1;
-      index++;
-      bufPtr[JTAG_byteIndex(index)] = TMS0;
-      index++;
-    }
+  {
+    bufPtr[JTAG_byteIndex(index - 1)] |= 0x22;
+    bufPtr[JTAG_byteIndex(index)] = TMS1;
+    index++;
+    bufPtr[JTAG_byteIndex(index)] = TMS0;
+    index++;
+  }
   bufPtr[JTAG_byteIndex(index)] = 0;
   index++;
   
   sizeBufSpecs = ((index-1)/4)+3;
-
+  
   return(sizeBufSpecs);
 }
 
@@ -1533,36 +1538,36 @@ int SpecstoJtag(U32 *bufSpecs, U8 *bufJtag, int nBits, int nHead, int nTrail)
       n = 8;
       j = 0;
       if( i == 1)
-	n = 8 - nHead;
+        n = 8 - nHead;
       if( i == nBytes )
-	{
-	  nBitsLeft = JTAG_bitsLeft(nBits+nHead+nTrail);
-	  j = 8 - nBitsLeft;
-	  n = nBitsLeft +j;
-	  tmp <<= 8 - nBitsLeft;
-	}
+      {
+        nBitsLeft = JTAG_bitsLeft(nBits+nHead+nTrail);
+        j = 8 - nBitsLeft;
+        n = nBitsLeft +j;
+        tmp <<= 8 - nBitsLeft;
+      }
       for(; j < n; j++)
-	{
-	  if(intrail)
-	    {
-	      intrail--;
-	      continue;
-	    }
-	  bufJtag[index] |=
-	    (tmp & (0x1 << j)) ? (0x1 << (7-done)) : 0; 
-	  done++;
-	  if(done == 8)
-	    {
-	      done = 0;
-	      index++;
-	    }
-	}
+      {
+        if(intrail)
+        {
+          intrail--;
+          continue;
+        }
+        bufJtag[index] |=
+          (tmp & (0x1 << j)) ? (0x1 << (7-done)) : 0; 
+        done++;
+        if(done == 8)
+        {
+          done = 0;
+          index++;
+        }
+      }
     }
   return 1;
 }
 
 void SpecsmasterNotifyClear(HANDLE Phdle,
-			    U32 Index)
+                            U32 Index)
 {
   RETURN_CODE     rc;
 
