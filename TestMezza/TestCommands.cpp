@@ -640,7 +640,7 @@ bool JTAG::operator() ( SPECSSLAVE * theSlave ) {
   dataIn[ 0 ] = 0x00 ;
   
   theError = specs_jtag_drscan( theSlave , m_outputSelect , dataIn , 
-                                dataOut , 64 ) ;
+                                dataOut , 32 ) ;
 
   
   if ( theError != SpecsSuccess ) { 
