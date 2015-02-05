@@ -8,9 +8,12 @@
 //#define DRIVER_VERSION  1140301
 //#define DRIVER_VERSION  1140401
 //#define DRIVER_VERSION    29042014 //compatible pof _io_2 bug master 2 
-#define DRIVER_VERSION    7141300  // iSpecs_Master_PCIe.sof du projet xxxxgen1_serie de 22:15
+//#define DRIVER_VERSION    7141300  // iSpecs_Master_PCIe.sof du projet xxxxgen1_serie de 22:15
 //#define DRIVER_VERSION    29072014
 //#define DRIVER_VERSION    3140601 
+
+#define DRIVER_VERSION    2151302  // Specs_Master_PCIe.sof du projet Specs_Master_PCIE_MTCA_13_4x_gen!_serie10
+
 //#ifndef PCI_CODE
 typedef enum _ACCESS_TYPE
 {
@@ -255,7 +258,7 @@ static const unsigned long bar_min_len[BARS] = { 4194304, 0, 32768 }; // see lsp
 
 #endif
 //#if  DRIVER_VERSION ==  3140601
-#if  DRIVER_VERSION == 29042014 ||  DRIVER_VERSION == 29072014 || DRIVER_VERSION ==  7141300
+#if  DRIVER_VERSION == 29042014 ||  DRIVER_VERSION == 29072014 || DRIVER_VERSION ==  7141300 || DRIVER_VERSION ==  2151302 
 #define  BASE_ADDRESS           0x1000000
 #define  OFFSET_CROSSING_BRIDGE    0x1000
 #define  PCI_EXPRESS_REGISTER        0x40 

@@ -5,8 +5,8 @@
  *
  * Ce driver permet de piloter la carte SpecsV2 ayant le firmware
  * spécifique développé pour le projet LHCb par Daniel Charlet.
- * On accéde à la carte via le fichier de peripherique /dev/SpecsV2[0-3]
- * par deux types d'acces open, read,close comme un fichier ou bien par open , mmap,close
+ * On accéde à la carte via le fichier de peripherique /dev/AltSpecsV2Master0
+ * par deux types d'acces open, ioctl,close comme un fichier ou bien par open , mmap,close
  * Le driver accédera au périphérique via une structure  
  * file_operations" qui permet certaines actions dont la pricipale ioctl: offre à
  * l'utilisateur la possibilite d'envoyer des commandes spécifiques.
@@ -18,7 +18,7 @@
  * \subsection running Running the program
  * .Le programme de test sera test.exe dans le package SpecsUser
  *
- *
+ * Dans ce code reste tout ce qui est lie aux interruptions (non utilise)
  */
 
 
@@ -181,7 +181,6 @@ static wait_queue_head_t pio_irq_waitq[NB_MASTER];
 
 static int nb_irq[NB_MASTER]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
 
-static int MaxDelay[NB_MASTER]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
 static int SlaveIt[NB_MASTER]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
 static  struct Aria5Specs_dev *SpecsDev=NULL;
 static  struct Master  *MasterList[NB_MASTER] ={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
@@ -226,43 +225,43 @@ static   irqreturn_t AltSpecsV2_isr(int irq, void *dev_id,struct pt_regs *regs)
 
   
   if (status & 0x10 )
-     {
+    {
     
-     status = ioread32(&specs_dev->pioMasterStatusIrqs->edge_capture);
-     if (status )
-       {
-	 iowrite32(0xFFFFFFFF,&specs_dev->pioMasterStatusIrqs->edge_capture);
-	 for ( num_fifo=0; num_fifo < NB_MASTER; num_fifo++)
-	   {
-	     pioFifoStatus= (struct PIO_Register*) ((specs_dev->bar[BAR2])+ PIO_STATUS_REG  + ( (num_fifo %4) * MASTERS_OFFSET)+ (OFFSET_CROSSING_BRIDGE* (num_fifo/4 + 1)));
-	     statusFifo = ioread32(&pioFifoStatus->edge_capture);
-	     iowrite32(0xFFFFFFFF,&pioFifoStatus->edge_capture);
-	     if (statusFifo )
-	       {
-		 // fifo_reg_recept= (struct FIFO_StatusRegister*) ((specs_dev->bar[BAR2])+FIFO_RECEPTION_STATUS+ ( (num_fifo %4) * MASTERS_OFFSET)+ (OFFSET_CROSSING_BRIDGE* (num_fifo/4 + 1)));
-		 pioRegCtrl =( struct PIO_Register*)((specs_dev->bar[BAR2])+PIO_CTRL_REG+ ((num_fifo%4) * MASTERS_OFFSET) + (OFFSET_CROSSING_BRIDGE* (num_fifo/4+1)));
-		 printk(KERN_INFO DRV_NAME "master status %x Reception of IT_FRAME/Checksum_error Irq %x for Master %d  nb_irq =%d\n",status,statusFifo,num_fifo,nb_irq[num_fifo]);
-		 SlaveIt[num_fifo]= statusFifo ;
+      status = ioread32(&specs_dev->pioMasterStatusIrqs->edge_capture);
+      if (status )
+	{
+	  iowrite32(0xFFFFFFFF,&specs_dev->pioMasterStatusIrqs->edge_capture);
+	  for ( num_fifo=0; num_fifo < NB_MASTER; num_fifo++)
+	    {
+	      pioFifoStatus= (struct PIO_Register*) ((specs_dev->bar[BAR2])+ PIO_STATUS_REG  + ( (num_fifo %4) * MASTERS_OFFSET)+ (OFFSET_CROSSING_BRIDGE* (num_fifo/4 + 1)));
+	      statusFifo = ioread32(&pioFifoStatus->edge_capture);
+	      iowrite32(0xFFFFFFFF,&pioFifoStatus->edge_capture);
+	      if (statusFifo )
+		{
+		  // fifo_reg_recept= (struct FIFO_StatusRegister*) ((specs_dev->bar[BAR2])+FIFO_RECEPTION_STATUS+ ( (num_fifo %4) * MASTERS_OFFSET)+ (OFFSET_CROSSING_BRIDGE* (num_fifo/4 + 1)));
+		  pioRegCtrl =( struct PIO_Register*)((specs_dev->bar[BAR2])+PIO_CTRL_REG+ ((num_fifo%4) * MASTERS_OFFSET) + (OFFSET_CROSSING_BRIDGE* (num_fifo/4+1)));
+		  printk(KERN_INFO DRV_NAME "master status %x Reception of IT_FRAME/Checksum_error Irq %x for Master %d  nb_irq =%d\n",status,statusFifo,num_fifo,nb_irq[num_fifo]);
+		  SlaveIt[num_fifo]= statusFifo ;
 
-		 // on devrait lire  la FIFO ici mais a priori il n'y a rien qui rentre dans la fifo seul la valeur du status permet de decoder le type d'IT 
+		  // on devrait lire  la FIFO ici mais a priori il n'y a rien qui rentre dans la fifo seul la valeur du status permet de decoder le type d'IT 
 		
 
-		 statusCtrl= ioread32(&pioRegCtrl->data_status);
+		  statusCtrl= ioread32(&pioRegCtrl->data_status);
 
-		 printk(KERN_INFO DRV_NAME "RAZ du bit 9 Ctrl %x add %x \n",statusCtrl,PIO_CTRL_REG+ ((num_fifo%4) * MASTERS_OFFSET) + (OFFSET_CROSSING_BRIDGE* (num_fifo/4+1)));	
-	       	iowrite32((0xFFFFF9FF & statusCtrl),&pioRegCtrl->data_status);
-		iowrite32((0x600 |  statusCtrl),&pioRegCtrl->data_status);
-	       	iowrite32((0xFFFFF9FF & statusCtrl),&pioRegCtrl->data_status);
-	       }
-	   }
-	 printk(KERN_INFO DRV_NAME " PIO Status interrupt Master %x \n",status);
+		  printk(KERN_INFO DRV_NAME "RAZ du bit 9 Ctrl %x add %x \n",statusCtrl,PIO_CTRL_REG+ ((num_fifo%4) * MASTERS_OFFSET) + (OFFSET_CROSSING_BRIDGE* (num_fifo/4+1)));	
+		  iowrite32((0xFFFFF9FF & statusCtrl),&pioRegCtrl->data_status);
+		  iowrite32((0x600 |  statusCtrl),&pioRegCtrl->data_status);
+		  iowrite32((0xFFFFF9FF & statusCtrl),&pioRegCtrl->data_status);
+		}
+	    }
+	  printk(KERN_INFO DRV_NAME " PIO Status interrupt Master %x \n",status);
 #ifdef DEBUG_IRQ 
-	 printk(KERN_INFO DRV_NAME " PIO Status interrupt Master0 %x \n",status);
+	  printk(KERN_INFO DRV_NAME " PIO Status interrupt Master0 %x \n",status);
 #endif
 	 
 	 
-       }
-     }
+	}
+    }
    
 
   return IRQ_HANDLED;
@@ -368,25 +367,25 @@ static int __devinit map_bars(struct Aria5Specs_dev *specs_dev, struct pci_dev *
 }
 static void __devinit test_version (  struct Aria5Specs_dev *specs_dev) {
  
- u32* pversion;
- u32 version;
+  u32* pversion;
+  u32 version;
  
  
- pversion =  (u32 *) ( (specs_dev->bar[BAR2]) + VERSION );
+  pversion =  (u32 *) ( (specs_dev->bar[BAR2]) + VERSION );
 
- version=ioread32(pversion);
+  version=ioread32(pversion);
 
- if (version == DRIVER_VERSION )
-   { 
-     printk(KERN_INFO DRV_NAME " Version number %d \n",version);
-     specs_dev->test_version =1;
-   }
- else
-   {
-     printk(KERN_ALERT DRV_NAME "!!!!!!!!     !!!!!  Driver not compatible %d \n",version); 
-    specs_dev->test_version =0;
-   }
- return ;	   	
+  if (version == DRIVER_VERSION )
+    { 
+      printk(KERN_INFO DRV_NAME " Version number %d \n",version);
+      specs_dev->test_version =1;
+    }
+  else
+    {
+      printk(KERN_ALERT DRV_NAME "!!!!!!!!     !!!!!  Driver not compatible %d \n",version); 
+      specs_dev->test_version =0;
+    }
+  return ;	   	
 } 
 /**
  *
@@ -482,30 +481,19 @@ static int __devinit probe(struct pci_dev *dev, const struct pci_device_id *id)
       }
   }
 #else
-  /*  if ((sizeof(dma_addr_t) > 4) && !pci_set_dma_mask(dev, DMA_64BIT_MASK)) {
-    pci_set_consistent_dma_mask(dev, DMA_64BIT_MASK);
-    printk(KERN_WARNING DRV_NAME " : Using  64-bit DMA mask.\n");
-  } 
-  else {
-    if (!pci_set_dma_mask(dev, DMA_32BIT_MASK)) {
-      printk(KERN_WARNING DRV_NAME " : set 32-bit DMA mask.\n");
-      pci_set_consistent_dma_mask(dev, DMA_32BIT_MASK);
-	
-    }
-  */
-if (!pci_set_dma_mask(dev, DMA_32BIT_MASK)) {
+   if (!pci_set_dma_mask(dev, DMA_32BIT_MASK)) {
 #ifdef DEBUG_PCI
-      printk(KERN_WARNING DRV_NAME " : set 32-bit DMA mask.\n");
+    printk(KERN_WARNING DRV_NAME " : set 32-bit DMA mask.\n");
 #endif
-      pci_set_consistent_dma_mask(dev, DMA_32BIT_MASK);
+    pci_set_consistent_dma_mask(dev, DMA_32BIT_MASK);
 	
+  }
+  else
+    {
+      printk(KERN_WARNING DRV_NAME "Could not set  32-bit DMA mask.\n");
+      rc = -1;
+      goto err_mask;
     }
-    else
-      {
-	printk(KERN_WARNING DRV_NAME "Could not set  32-bit DMA mask.\n");
-	rc = -1;
-	goto err_mask;
-      }
 
 #endif    
 	  
@@ -517,11 +505,11 @@ if (!pci_set_dma_mask(dev, DMA_32BIT_MASK)) {
   if (rc)
     goto err_map;
   
- rc= pci_write_config_byte(dev,0x52, 0x84);  //MSI DISABLE REGISTER
+  rc= pci_write_config_byte(dev,0x52, 0x84);  //MSI DISABLE REGISTER
 
   rc = pci_read_config_byte(dev,0x52, &mypin); 
 #ifdef DEBUG_PCI
-    printk(KERN_WARNING DRV_NAME " 0x52 : %x \n",mypin);
+  printk(KERN_WARNING DRV_NAME " 0x52 : %x \n",mypin);
 #endif
    
   specs_dev->irq_count=0;
@@ -529,38 +517,38 @@ if (!pci_set_dma_mask(dev, DMA_32BIT_MASK)) {
   rc = specs_dev_init(specs_dev);
   if (rc)
     { printk(KERN_ALERT DRV_NAME " !! specs_dev_init error\n");
-    goto err_cdev;
+      goto err_cdev;
     }
 #ifdef DEBUG_PCI 
- printk(KERN_ALERT DRV_NAME " !! specs_dev_init Ok \n" ); 
+  printk(KERN_ALERT DRV_NAME " !! specs_dev_init Ok \n" ); 
 #endif
   /* enable bus master capability on device */
   pci_set_master(dev);
 
  
-   SpecsDev= specs_dev;
+  SpecsDev= specs_dev;
   init_waitqueue_head(&dma_irq_waitq);
   for (i=0 ;i< NB_MASTER ;i++)
-  init_waitqueue_head(&pio_irq_waitq[i]);
+    init_waitqueue_head(&pio_irq_waitq[i]);
 
   pci_read_config_byte(dev, PCI_REVISION_ID, &specs_dev->revision);
 #ifdef DEBUG_PCI
   printk(KERN_INFO DRV_NAME " Revision %d \n",specs_dev->revision );
 #endif
-     test_version(specs_dev);
+  test_version(specs_dev);
   //specs_dev->test_version =1;
- rc = pci_read_config_byte(dev, PCI_INTERRUPT_PIN, &mypin);
+  rc = pci_read_config_byte(dev, PCI_INTERRUPT_PIN, &mypin);
   if (mypin)
     {
       specs_dev->irq_num= dev->irq;
        	   	  
-     if( request_irq(dev->irq,AltSpecsV2_isr, IRQF_SHARED,DRV_NAME,specs_dev ) <0)
+      if( request_irq(dev->irq,AltSpecsV2_isr, IRQF_SHARED,DRV_NAME,specs_dev ) <0)
 	{
 	  printk(KERN_ALERT DRV_NAME " : unable to register irq handler\n");
 	  goto err_irq;
 	}
 #ifdef DEBUG_PCI
-     printk(KERN_WARNING DRV_NAME " : install irq Handler OK dev->irq= %d mypin %d \n",dev->irq,mypin);
+      printk(KERN_WARNING DRV_NAME " : install irq Handler OK dev->irq= %d mypin %d \n",dev->irq,mypin);
 #endif
     }
   else
@@ -574,51 +562,51 @@ if (!pci_set_dma_mask(dev, DMA_32BIT_MASK)) {
 #endif
   p =( struct AvalonMM_CSR*)((specs_dev->bar[BAR2])+PCI_EXPRESS_REGISTER);
   status = ioread32(&p->interrupt_status);
-   iowrite32(cpu_to_le32( 0x0),&p->enableIrq); 
-   status = ioread32(&p->enableIrq);
-   // A revoir 
+  iowrite32(cpu_to_le32( 0x0),&p->enableIrq); 
+  status = ioread32(&p->enableIrq);
+  // A revoir 
      	
-   iowrite32(cpu_to_le32(status | 0xFFFF),&p->enableIrq);
+  iowrite32(cpu_to_le32(status | 0xFFFF),&p->enableIrq);
 
 
-   for (i=0;i <NB_MASTER;i++) 
-     {
-       specs_dev->masterIdUsed[i]=0; // initialisation des Master en cours
-       specs_dev->firstWriteFifo[i]=0; // on a jamais ecrit dans la fifo du master
-     }
-   for (i=0;i <NB_MASTER;i++) 
-     {
-       master= kzalloc(sizeof(struct Master), GFP_KERNEL);
-       if (!master) {
-	 printk(KERN_ALERT "Could not kzalloc()ate memory.\n");
-	 return -199;
-       }
-       master->id = -2;
-       MasterList[i]= master;
+  for (i=0;i <NB_MASTER;i++) 
+    {
+      specs_dev->masterIdUsed[i]=0; // initialisation des Master en cours
+      specs_dev->firstWriteFifo[i]=0; // on a jamais ecrit dans la fifo du master
+    }
+  for (i=0;i <NB_MASTER;i++) 
+    {
+      master= kzalloc(sizeof(struct Master), GFP_KERNEL);
+      if (!master) {
+	printk(KERN_ALERT "Could not kzalloc()ate memory.\n");
+	return -199;
+      }
+      master->id = -2;
+      MasterList[i]= master;
   
-     }
- // enable les irqs sur  PIO masterFifoIrqs pour data in FIFOS
-      specs_dev->pioMasterFifoIrqs =( struct PIO_Register*)((specs_dev->bar[BAR2])+PIO_MASTERS_FIFO_IRQS);
-      iowrite32(0xFFFFFFFF,& specs_dev->pioMasterFifoIrqs->edge_capture);		
-      iowrite32(0xFFFF,& specs_dev->pioMasterFifoIrqs->interrupt_mask);
+    }
+  // enable les irqs sur  PIO masterFifoIrqs pour data in FIFOS
+  specs_dev->pioMasterFifoIrqs =( struct PIO_Register*)((specs_dev->bar[BAR2])+PIO_MASTERS_FIFO_IRQS);
+  iowrite32(0xFFFFFFFF,& specs_dev->pioMasterFifoIrqs->edge_capture);		
+  iowrite32(0xFFFF,& specs_dev->pioMasterFifoIrqs->interrupt_mask);
  
-      udelay(50); 
-     // enable les irqs sur  PIO masterStatusIrqs pour IT_FRAME /checksum error   
-       specs_dev->pioMasterStatusIrqs =( struct PIO_Register*)((specs_dev->bar[BAR2])+PIO_MASTERS_STATUS_IRQS);
-      iowrite32(0xFFFFFFFF,& specs_dev->pioMasterStatusIrqs->edge_capture);		
-      iowrite32(0xFFFF,& specs_dev->pioMasterStatusIrqs->interrupt_mask);
+  udelay(50); 
+  // enable les irqs sur  PIO masterStatusIrqs pour IT_FRAME /checksum error   
+  specs_dev->pioMasterStatusIrqs =( struct PIO_Register*)((specs_dev->bar[BAR2])+PIO_MASTERS_STATUS_IRQS);
+  iowrite32(0xFFFFFFFF,& specs_dev->pioMasterStatusIrqs->edge_capture);		
+  iowrite32(0xFFFF,& specs_dev->pioMasterStatusIrqs->interrupt_mask);
 
-      udelay(50); 
-   goto end;
+  udelay(50); 
+  goto end;
 
 
  err_cdev:
   /* unmap the BARs */
-specs_dev_exit(specs_dev);
+  specs_dev_exit(specs_dev);
   unmap_bars(specs_dev, dev);
 
  err_map:
-   if (specs_dev->irq_num > 0)
+  if (specs_dev->irq_num > 0)
     free_irq(specs_dev->irq_num,specs_dev); 
   pci_release_regions(dev);
  err_irq :
@@ -687,12 +675,12 @@ static void __devexit remove(struct pci_dev *dev) {
 #ifdef DEBUG_PCI
   printk(KERN_WARNING DRV_NAME "Freeing specs_dev %p\n", specs_dev);
 #endif
- for (i=0;i <NB_MASTER;i++) 
-   {
-     if (MasterList[i]) kfree (MasterList[i]);
-   }
- if (specs_dev)
-   kfree(specs_dev);
+  for (i=0;i <NB_MASTER;i++) 
+    {
+      if (MasterList[i]) kfree (MasterList[i]);
+    }
+  if (specs_dev)
+    kfree(specs_dev);
   
 }
 
@@ -754,18 +742,19 @@ static int specs_dev_open(struct inode *inode, struct file *file) {
  */
 
 static int specs_dev_ioctl(struct inode *inode, struct file *file,
-		    unsigned int ioctl_num, /* number and param for ioctl */
-		    unsigned long ioctl_param) 
+			   unsigned int ioctl_num, /* number and param for ioctl */
+			   unsigned long ioctl_param) 
 {
-struct Master *master =  NULL;
- struct Aria5Specs_dev *specs_dev= NULL;
+  struct Master *master =  NULL;
+  struct Aria5Specs_dev *specs_dev= NULL;
   struct pci_dev *pDev;
   /* the write DMA header sits after the read header at address 0x10 */
   
   int  rc = 0;
   u32 status = 0;
+  u32 status_reg=0;
   unsigned char slot,bus;
- 
+  int level2,level1;
   DEVICE_LOCATION pLoc;
   BUSIOPDATA pBusIop;
   INTERRUPT_OBJ pIntObj;
@@ -773,33 +762,34 @@ struct Master *master =  NULL;
   u32 *pBuf32; 
   int level_fifo; 
   u32 *pReset;
+  u32 valReset=0;
   rc=0;
   
   specs_dev = SpecsDev;
  
-    switch (ioctl_num) {
+  switch (ioctl_num) {
     if (!capable(CAP_SYS_RAWIO))
       return -EPERM;
     
   
  
- case IOCTL_FIND_DEVICE:
-   if (specs_dev == NULL) {  rc =2; break;}
-   if ( specs_dev->test_version !=1 ) {rc =2; break;}
-   if (! access_ok(VERIFY_READ,(void *) ioctl_param, sizeof ( DEVICE_LOCATION ))) return -EFAULT;
-   if (!copy_from_user(&pLoc,( DEVICE_LOCATION*) ioctl_param, sizeof( DEVICE_LOCATION)))
-     {
-       pDev= specs_dev->pci_device;
-       slot = PCI_SLOT(pDev->devfn);
-       bus=pDev->bus->number;
+  case IOCTL_FIND_DEVICE:
+    if (specs_dev == NULL) {  rc =2; break;}
+    if ( specs_dev->test_version !=1 ) {rc =2; break;}
+    if (! access_ok(VERIFY_READ,(void *) ioctl_param, sizeof ( DEVICE_LOCATION ))) return -EFAULT;
+    if (!copy_from_user(&pLoc,( DEVICE_LOCATION*) ioctl_param, sizeof( DEVICE_LOCATION)))
+      {
+	pDev= specs_dev->pci_device;
+	slot = PCI_SLOT(pDev->devfn);
+	bus=pDev->bus->number;
 #ifdef DEBUG_SPECS 
-       printk(KERN_INFO DRV_NAME " BUS %d:%d Slot %d:%d \n",pLoc.BusNumber,bus, pLoc.SlotNumber,slot);
+	printk(KERN_INFO DRV_NAME " BUS %d:%d Slot %d:%d \n",pLoc.BusNumber,bus, pLoc.SlotNumber,slot);
 #endif
-       if (( pLoc.BusNumber==bus)&&( pLoc.SlotNumber==slot)) rc= 0;
-       else rc =1;
-     }
-   else rc=1;
-   break;
+	if (( pLoc.BusNumber==bus)&&( pLoc.SlotNumber==slot)) rc= 0;
+	else rc =1;
+      }
+    else rc=1;
+    break;
  
   case IOCTL_READ_FILL_LEVEL :
    
@@ -808,8 +798,17 @@ struct Master *master =  NULL;
       { 
 	master=MasterList[pBusIop.MasterID];	
 	pBuf32=(u32*)pBusIop.Buffer;
-	//  event= ioread32 (&fifo_reg_recept->event);
-	// if (event) iowrite32 ( event, &fifo_reg_recept->event);
+        // permet d'attendre ici un si au lieu de repasser au niveau user
+	for (i=0; i<10 ;i++){
+	  level1=ioread32 (&master->fifoRecIn_Status->fill_level);
+	  udelay(1);
+	  level2=ioread32 (&master->fifoRecIn_Status->fill_level);
+	  if (level1 ==  level2 )
+	    {
+	      pBuf32[0]=level1;
+	      break;
+	    }
+	}
 	pBuf32[0]= ioread32 (&master->fifoRecIn_Status->fill_level);
 #ifdef DEBUG_SPECS 	
 	printk(KERN_INFO DRV_NAME "FIFO Recep read level =%d event %x Fifo Addr %x\n",ioread32 (&master->fifoRecIn_Status->fill_level),ioread32 (&master->fifoRecIn_Status->event), (pBusIop.Address + OFFSET_FIFO_REC_IN_STATUS));
@@ -844,104 +843,88 @@ struct Master *master =  NULL;
 	
 	      }
 	  }
-	/*	if (  (pBusIop.Address & MASK_FIFO_IN )  ==  (  FIFO_RECEPTION_IN & MASK_FIFO_IN) )
-	  {  master=MasterList[pBusIop.MasterID];
-	  
-
-	    status= ioread32(&master->pioRegCtrl->data_status);
-#ifdef DEBUG_SPECS
-	    printk(KERN_INFO DRV_NAME "RAZ du Ctrl %x  \n",status);
-#endif
-	    
-	    iowrite32((0xFFFFFFEF & status),&master->pioRegCtrl->data_status);
-	    iowrite32((0x10 |  status),&master->pioRegCtrl->data_status);
-	    iowrite32((0xFFFFFFEF & status),&master->pioRegCtrl->data_status);
-	  }
-	*/
       }
     else rc=-1;
     
    
     
     break;
- case IOCTL_BUS_IOP_WRITE :
+  case IOCTL_BUS_IOP_WRITE :
 
-   if (! access_ok(VERIFY_READ,(void *) ioctl_param, sizeof ( BUSIOPDATA ))) return -EFAULT;
-   if (!copy_from_user(&pBusIop,( BUSIOPDATA*) ioctl_param, sizeof( BUSIOPDATA)))
-     {
+    if (! access_ok(VERIFY_READ,(void *) ioctl_param, sizeof ( BUSIOPDATA ))) return -EFAULT;
+    if (!copy_from_user(&pBusIop,( BUSIOPDATA*) ioctl_param, sizeof( BUSIOPDATA)))
+      {
        
 #ifdef DEBUG_SPECS
-       printk(KERN_INFO DRV_NAME " Size %d type %d  address %lx\n",pBusIop.TransferSize,pBusIop.AccessType,pBusIop.Address );
+	printk(KERN_INFO DRV_NAME " Size %d type %d  address %lx\n",pBusIop.TransferSize,pBusIop.AccessType,pBusIop.Address );
 #endif
-       if (  (pBusIop.Address & MASK_FIFO_IN )  ==  ( FIFO_EMISSION_OUT & MASK_FIFO_IN) )
-	 {
-	   master=MasterList[pBusIop.MasterID];
-	   level_fifo = ioread32 (&master->fifoEmiOut_Status->fill_level);
-	   //   printk(KERN_ALERT DRV_NAME " level in func write %d  to write %d \n",level_fifo,count);  
-	   for (i=0 ;i < 100 ;i++)  // attente que l'on ai fini d'ecrire dans la fifo (PLX_IT2)
-	     {
-	       level_fifo = ioread32 (&master->fifoEmiOut_Status->fill_level);
+	if (  (pBusIop.Address & MASK_FIFO_IN )  ==  ( FIFO_EMISSION_OUT & MASK_FIFO_IN) )
+	  {
+	    master=MasterList[pBusIop.MasterID];
+	    level_fifo = ioread32 (&master->fifoEmiOut_Status->fill_level);
+	    // si level_fifo > 0 il faut faire un reset de la fifo
+	    if (level_fifo > 0)  
+	      {
+		printk(KERN_INFO DRV_NAME "Fifo avec %d octets avant ecriture\n",level_fifo);
+		rc = -2;
+		break;
+	      }
+	    // on ecrit les donnees dans la fifo
+	    pBuf32=(u32*)pBusIop.Buffer;
+	    for (i=0; i< pBusIop.TransferSize ; i++)
+	      { 
+		iowrite32( pBuf32[i],(master->fifoEmiOut ) );
 	       
-	       if ( level_fifo == 0 ) {
-		 if (MaxDelay[master->id]< i)  MaxDelay[master->id]=i;
-		 break;
-	       }
-	       udelay(20);
-	       
-	     }
-	   udelay(40); // il faut attendre encore un peu
-	   if (level_fifo > 0) 
-	     {
-	       //  printk(KERN_INFO DRV_NAME "Fifo Emi Out not empty %d\n",level_fifo);
-	       status= ioread32(&master->pioRegCtrl->data_status);
-	       mb();	
-	          iowrite32((0x4000 |  status),&master->pioRegCtrl->data_status);
-		    udelay(5);
-	       mb();
-	          iowrite32(( 0xFFFFBFFF & status),&master->pioRegCtrl->data_status);
-	       return 0; 
-	     }
-	   pBuf32=(u32*)pBusIop.Buffer;
-	   for (i=0; i< pBusIop.TransferSize ; i++)
-	     { 
-	       iowrite32( pBuf32[i],(master->fifoEmiOut ) );
 #ifdef DEBUG_SPECS
-	       printk(KERN_INFO DRV_NAME " Write32: pBuf[%d] = %x    \n",i,pBuf32[i] );
+		printk(KERN_INFO DRV_NAME " Write32: pBuf[%d] = %x    \n",i,pBuf32[i] );
 #endif	       
-	       
-	     }
-	   status= ioread32(&master->pioRegCtrl->data_status);
-	   mb();	
-	     iowrite32((0x4000 |  status),&master->pioRegCtrl->data_status);
-	   mb();
-	    udelay(5);
-	    iowrite32(( 0xFFFFBFFF & status),&master->pioRegCtrl->data_status);
+	     
+	      }
+	    // ecriture du bit de start qui declenche l'ecriture de la FIFO vers le slave
+	    status= ioread32(&master->pioRegCtrl->data_status);
+	    iowrite32((0x4000 |  status),&master->pioRegCtrl->data_status);
+
+	    // attente du 3eme bit du status register indiquant la fin de trame de fla fifo
+	    for (i=0 ;i < 10000 ;i++) 
+	      {
+		status_reg = ioread32(&master->pioRegStatus->data_status);
+		if  ( status_reg  & 0x4 ) {
+		  rc=1; 
+		  break;
+		}
+	      }
 	   
-	   rc=1;
-	 }
-       
-       else 
-	 {
-	   if (pBusIop.AccessType ==    BitSize32)
-	     {    
-	       pBuf32=(u32*)pBusIop.Buffer;
-	       for (i=0; i< pBusIop.TransferSize ; i++)
-		 { 
-		   iowrite32( pBuf32[i],(u32*)((specs_dev->bar[BAR2])+ pBusIop.Address ) );
-#ifdef DEBUG_SPECS
-		   printk(KERN_INFO DRV_NAME " Write32: pBuf[%d] = %x   address %lx \n",i,pBuf32[i],pBusIop.Address );
-#endif	       
-		   rc=1;
-		   
-		 }
-	     }
-	   
-	 }
-    
-     }
+	    if ( i== 10000){
+	      printk(KERN_INFO DRV_NAME " FIFO non videe \n");
+	      rc=-2;
+	    }
+	    iowrite32(( 0xFFFF8FFF & status),&master->pioRegCtrl->data_status);
 	  
-   else rc=-1;
-   break;
+	  
+	  }
+	// ecriture dans un registre
+	else 
+	  {
+	    if (pBusIop.AccessType ==    BitSize32)
+	      {    
+		pBuf32=(u32*)pBusIop.Buffer;
+		for (i=0; i< pBusIop.TransferSize ; i++)
+		  { 
+		    iowrite32( pBuf32[i],(u32*)((specs_dev->bar[BAR2])+ pBusIop.Address ) );
+#ifdef DEBUG_SPECS
+		    printk(KERN_INFO DRV_NAME " Write32: pBuf[%d] = %x   address %lx \n",i,pBuf32[i],pBusIop.Address );
+#endif	       
+		    rc=1;
+		   
+		  }
+	      }
+	   
+	  }
+    
+      }
+	  
+    else rc=-1;
+    break;
   case IOCTL_ENABLE_PIO_INTERRUPT : 
     if (! access_ok(VERIFY_READ,(void *) ioctl_param, sizeof ( INTERRUPT_OBJ ))) return -EFAULT;
     if (!copy_from_user(&pIntObj,( INTERRUPT_OBJ*) ioctl_param, sizeof( INTERRUPT_OBJ)))
@@ -952,9 +935,9 @@ struct Master *master =  NULL;
 #endif 
 	if (pIntObj.pio_line == IT_STATUS ) // a revoir si besoin 
 	  {
-	    	    iowrite32(0xFF0080,&master->pioRegStatus->interrupt_mask); // frame_it+ checksum bit 0x8
-	            iowrite32(0xFFFFFFFF,&master->pioRegStatus->edge_capture);
-		    iowrite32(0xFFFFFFFF,&master->pioRegStatus->edge_capture);
+	    iowrite32(0xFF0080,&master->pioRegStatus->interrupt_mask); // frame_it+ checksum bit 0x8
+	    iowrite32(0xFFFFFFFF,&master->pioRegStatus->edge_capture);
+	    iowrite32(0xFFFFFFFF,&master->pioRegStatus->edge_capture);
 
 	    rc=0;
 	  }
@@ -972,10 +955,10 @@ struct Master *master =  NULL;
 	if (pIntObj.pio_line == IT_STATUS) // A revoir aussi
 	  {
 	   
-	       iowrite32(0,&master->pioRegStatus->interrupt_mask);
-	       status = ioread32(&master->pioRegStatus->edge_capture);
-	       iowrite32(0xFFFFFFFF,&master->pioRegStatus->edge_capture);
-	       iowrite32(0xFFFFFFFF,&master->pioRegStatus->edge_capture);
+	    iowrite32(0,&master->pioRegStatus->interrupt_mask);
+	    status = ioread32(&master->pioRegStatus->edge_capture);
+	    iowrite32(0xFFFFFFFF,&master->pioRegStatus->edge_capture);
+	    iowrite32(0xFFFFFFFF,&master->pioRegStatus->edge_capture);
 
 	  }
 	
@@ -989,77 +972,76 @@ struct Master *master =  NULL;
     master=MasterList[ioctl_param];
   
     k=ioctl_param;
-    //   printk(KERN_INFO DRV_NAME " FIFO %d addr %x \n",k,FIFO_RECEPTION_STATUS+ ((k%4) * MASTERS_OFFSET)+ (OFFSET_CROSSING_BRIDGE* (k/4+1)) );
-   
-	master->fifoRecIn_Status= (struct FIFO_StatusRegister*) ((specs_dev->bar[BAR2])+FIFO_RECEPTION_STATUS+ ((k%4) * MASTERS_OFFSET)+ (OFFSET_CROSSING_BRIDGE* (k/4+1)));
-	master->fifoEmiOut_Status= (struct FIFO_StatusRegister*)( (specs_dev->bar[BAR2])+FIFO_EMISSION_STATUS+ ((k%4) * MASTERS_OFFSET)+ (OFFSET_CROSSING_BRIDGE* (k/4+1)));
-	master->pioRegCtrl =( struct PIO_Register*)((specs_dev->bar[BAR2])+PIO_CTRL_REG+ ((k%4) * MASTERS_OFFSET) + (OFFSET_CROSSING_BRIDGE* (k/4+1)));
-      	master->pioRegStatus =( struct PIO_Register*)((specs_dev->bar[BAR2])+ PIO_STATUS_REG + ((k%4) * MASTERS_OFFSET) + (OFFSET_CROSSING_BRIDGE* (k/4+1)));
-	master->fifoRecIn =(u32* )((specs_dev->bar[BAR2])+ FIFO_RECEPTION_IN   + ((k%4) * MASTERS_OFFSET) + (OFFSET_CROSSING_BRIDGE* (k/4+1)));
-	master->fifoEmiOut =(u32* )((specs_dev->bar[BAR2])+ FIFO_EMISSION_OUT  + ((k%4) * MASTERS_OFFSET) + (OFFSET_CROSSING_BRIDGE* (k/4+1)));
+    
+    master->fifoRecIn_Status= (struct FIFO_StatusRegister*) ((specs_dev->bar[BAR2])+FIFO_RECEPTION_STATUS+ ((k%4) * MASTERS_OFFSET)+ (OFFSET_CROSSING_BRIDGE* (k/4+1)));
+    master->fifoEmiOut_Status= (struct FIFO_StatusRegister*)( (specs_dev->bar[BAR2])+FIFO_EMISSION_STATUS+ ((k%4) * MASTERS_OFFSET)+ (OFFSET_CROSSING_BRIDGE* (k/4+1)));
+    master->pioRegCtrl =( struct PIO_Register*)((specs_dev->bar[BAR2])+PIO_CTRL_REG+ ((k%4) * MASTERS_OFFSET) + (OFFSET_CROSSING_BRIDGE* (k/4+1)));
+    master->pioRegStatus =( struct PIO_Register*)((specs_dev->bar[BAR2])+ PIO_STATUS_REG + ((k%4) * MASTERS_OFFSET) + (OFFSET_CROSSING_BRIDGE* (k/4+1)));
+    master->fifoRecIn =(u32* )((specs_dev->bar[BAR2])+ FIFO_RECEPTION_IN   + ((k%4) * MASTERS_OFFSET) + (OFFSET_CROSSING_BRIDGE* (k/4+1)));
+    master->fifoEmiOut =(u32* )((specs_dev->bar[BAR2])+ FIFO_EMISSION_OUT  + ((k%4) * MASTERS_OFFSET) + (OFFSET_CROSSING_BRIDGE* (k/4+1)));
 #ifdef DEBUG_SPECS
-	printk(KERN_INFO DRV_NAME " FIFO %d event %x interrupt %x level %d  full %d empty %d \n",k,ioread32(&master->fifoEmiOut_Status->event),ioread32(&master->fifoEmiOut_Status->interrupt_enable),ioread32 (&master->fifoEmiOut_Status->fill_level),ioread32(&master->fifoEmiOut_Status->almost_full) ,ioread32(&master->fifoEmiOut_Status->almost_empty) );
-	printk(KERN_INFO DRV_NAME " FIFO %d level %d %d \n",k,ioread32 (&master->fifoRecIn_Status->fill_level),ioread32 (&master->fifoRecIn_Status->fill_level));
-	printk(KERN_INFO DRV_NAME " FIFO %d level %d %d \n",k,ioread32 (&master->fifoRecIn_Status->fill_level),ioread32 (&master->fifoEmiOut_Status->fill_level));
+    printk(KERN_INFO DRV_NAME " FIFO %d event %x interrupt %x level %d  full %d empty %d \n",k,ioread32(&master->fifoEmiOut_Status->event),ioread32(&master->fifoEmiOut_Status->interrupt_enable),ioread32 (&master->fifoEmiOut_Status->fill_level),ioread32(&master->fifoEmiOut_Status->almost_full) ,ioread32(&master->fifoEmiOut_Status->almost_empty) );
+    printk(KERN_INFO DRV_NAME " FIFO %d level %d %d \n",k,ioread32 (&master->fifoRecIn_Status->fill_level),ioread32 (&master->fifoRecIn_Status->fill_level));
+    printk(KERN_INFO DRV_NAME " FIFO %d level %d %d \n",k,ioread32 (&master->fifoRecIn_Status->fill_level),ioread32 (&master->fifoEmiOut_Status->fill_level));
 #endif 
+    /*
+      int reset;
+      reset= ( 1 << k);
+      pReset= (u32*) (specs_dev->bar[BAR2]+ RESET);
+      printk(KERN_INFO DRV_NAME " RESET one %x = %x\n",pReset,reset);	
+      iowrite32(reset, pReset);
+      iowrite32(0x0000, pReset);
 	
-	/*
-	reset= ( 1 << k);
-	pReset= (u32*) (specs_dev->bar[BAR2]+ RESET);
-	printk(KERN_INFO DRV_NAME " RESET one %x = %x\n",pReset,reset);	
-	iowrite32(reset, pReset);
-	iowrite32(0x0000, pReset);
+      do {
+      iowrite32(0x0000, pReset);
+      printk(KERN_INFO DRV_NAME " Reset one niveau haut \n");
 	
-	do {
-	iowrite32(0x0000, pReset);
-	printk(KERN_INFO DRV_NAME " Reset one niveau haut \n");
+      }while (ioread32 (pReset) != 0 );
+    */	
 	
-	}while (ioread32 (pReset) != 0 );
 		
-	*/
-		
-	//iowrite32(0x0000, pReset);
+    //iowrite32(0x0000, pReset);
 	
 
-	// udelay(50);	
+    // udelay(50);	
 			  
-	iowrite32((0x00000000 ),&master->pioRegCtrl->direction);
-	// reset FIFOS 	
-	iowrite32(0x0 ,&master->pioRegCtrl->data_status);
-	iowrite32(0x10 ,&master->pioRegCtrl->data_status); //avant mis 0x8
-	iowrite32(0x0 ,&master->pioRegCtrl->data_status);
+    iowrite32((0x00000000 ),&master->pioRegCtrl->direction);
+    // reset FIFOS 	
+    iowrite32(0x0 ,&master->pioRegCtrl->data_status);
+    iowrite32(0x10,&master->pioRegCtrl->data_status); //avant mis 0x8
+    iowrite32(0x0 ,&master->pioRegCtrl->data_status);
 	
-	for (i=0 ; i< 4;i++)
-	  {
-	    rc=0;
-	    iowrite32( 0x3F,&master->fifoEmiOut_Status->event);
-	    if ( ioread32(&master->fifoEmiOut_Status->event) != 0x0) rc=1;
-	    iowrite32( 0,&master->fifoEmiOut_Status->interrupt_enable);
-	    if ( ioread32(&master->fifoEmiOut_Status->interrupt_enable) != 0) rc=2;
-	    iowrite32(280,&master->fifoEmiOut_Status->almost_full);
-	      if ( ioread32(&master->fifoEmiOut_Status->almost_full) != 280) rc =3;
-	      iowrite32(ALMOST_EMPTY,&master->fifoEmiOut_Status->almost_empty);
-	    if ( ioread32(&master->fifoEmiOut_Status->almost_empty) !=ALMOST_EMPTY) rc =4;
-	    iowrite32( 0x3F,&master->fifoRecIn_Status->event);
-	    if ( ioread32(&master->fifoRecIn_Status->event) !=0x0 )  rc=5;
+    for (i=0 ; i< 4;i++)
+      {
+	rc=0;
+	iowrite32( 0x3F,&master->fifoEmiOut_Status->event);
+	if ( ioread32(&master->fifoEmiOut_Status->event) != 0x0) rc=1;
+	iowrite32( 0,&master->fifoEmiOut_Status->interrupt_enable);
+	if ( ioread32(&master->fifoEmiOut_Status->interrupt_enable) != 0) rc=2;
+	iowrite32(280,&master->fifoEmiOut_Status->almost_full);
+	if ( ioread32(&master->fifoEmiOut_Status->almost_full) != 280) rc =3;
+	iowrite32(ALMOST_EMPTY,&master->fifoEmiOut_Status->almost_empty);
+	if ( ioread32(&master->fifoEmiOut_Status->almost_empty) !=ALMOST_EMPTY) rc =4;
+	iowrite32( 0x3F,&master->fifoRecIn_Status->event);
+	if ( ioread32(&master->fifoRecIn_Status->event) !=0x0 )  rc=5;
 	    
-	    iowrite32( 0,&master->fifoRecIn_Status->interrupt_enable);
-	    if ( ioread32(&master->fifoRecIn_Status->interrupt_enable) !=0 ) rc =6;
-	    iowrite32(ALMOST_FULL,&master->fifoRecIn_Status->almost_full);
-	    	if ( ioread32(&master->fifoRecIn_Status->almost_full) != ALMOST_FULL ) rc=7;
-	    iowrite32(ALMOST_EMPTY,&master->fifoRecIn_Status->almost_empty);
-	    if (ioread32(&master->fifoRecIn_Status->almost_empty) != ALMOST_EMPTY) rc =8;
-	  }
+	iowrite32( 0,&master->fifoRecIn_Status->interrupt_enable);
+	if ( ioread32(&master->fifoRecIn_Status->interrupt_enable) !=0 ) rc =6;
+	iowrite32(ALMOST_FULL,&master->fifoRecIn_Status->almost_full);
+	if ( ioread32(&master->fifoRecIn_Status->almost_full) != ALMOST_FULL ) rc=7;
+	iowrite32(ALMOST_EMPTY,&master->fifoRecIn_Status->almost_empty);
+	if (ioread32(&master->fifoRecIn_Status->almost_empty) != ALMOST_EMPTY) rc =8;
+      }
 
-	//	iowrite32( 0x4,&fifo_reg_recept->interrupt_enable);
+    //	iowrite32( 0x4,&fifo_reg_recept->interrupt_enable);
  
 
 #ifdef DEBUG_SPECS
-	printk(KERN_INFO DRV_NAME " FIFO emission %d event %x interrupt %x level %d  full %d empty %d \n",k,ioread32(&master->fifoEmiOut_Status->event),ioread32(&master->fifoEmiOut_Status->interrupt_enable),ioread32 (&master->fifoEmiOut_Status->fill_level),ioread32(&master->fifoEmiOut_Status->almost_full) ,ioread32(&master->fifoEmiOut_Status->almost_empty) );
+    printk(KERN_INFO DRV_NAME " FIFO emission %d event %x interrupt %x level %d  full %d empty %d \n",k,ioread32(&master->fifoEmiOut_Status->event),ioread32(&master->fifoEmiOut_Status->interrupt_enable),ioread32 (&master->fifoEmiOut_Status->fill_level),ioread32(&master->fifoEmiOut_Status->almost_full) ,ioread32(&master->fifoEmiOut_Status->almost_empty) );
 #endif
-       	status= ioread32(&master->pioRegCtrl->data_status);
+    status= ioread32(&master->pioRegCtrl->data_status);
 #ifdef DEBUG_SPECS
-	printk(KERN_INFO DRV_NAME "Valeur initiale du PIO Ctrl %x addr CtrlReg %x\n",status,PIO_CTRL_REG+ ((k%4) * MASTERS_OFFSET) + (OFFSET_CROSSING_BRIDGE* (k/4+1)));
+    printk(KERN_INFO DRV_NAME "Valeur initiale du PIO Ctrl %x addr CtrlReg %x\n",status,PIO_CTRL_REG+ ((k%4) * MASTERS_OFFSET) + (OFFSET_CROSSING_BRIDGE* (k/4+1)));
 #endif
        
   
@@ -1069,10 +1051,10 @@ struct Master *master =  NULL;
 #ifdef PROTECTED_ACCESS
     
     if (specs_dev->masterIdUsed[ioctl_param] != 0)
-	{   
+      {   
 	 
-          rc=1;
-	}
+	rc=1;
+      }
     else {
       if (master->id== -2)
 	{
@@ -1087,20 +1069,23 @@ struct Master *master =  NULL;
     rc=0;
 #endif
     break;
- case IOCTL_CLOSE_MASTER :
+  case IOCTL_CLOSE_MASTER :
+    master=MasterList[ioctl_param];
+    level_fifo = ioread32 (&master->fifoEmiOut_Status->fill_level);
+ 
 #ifdef PROTECTED_ACCESS
- master=MasterList[ioctl_param];
+    master=MasterList[ioctl_param];
     if (specs_dev->masterIdUsed[ioctl_param] == 0)
-	{
-          rc=1;
-	}
+      {
+	rc=1;
+      }
     else
       { 
         if (	master->id == ioctl_param)
 	  {
 	    specs_dev->masterIdUsed[ioctl_param]=0;
 	    master->id=-2;
-	     specs_dev->firstWriteFifo[ioctl_param]=0;
+	    specs_dev->firstWriteFifo[ioctl_param]=0;
 	    rc=0;
 	  }
 	else rc=1;
@@ -1108,38 +1093,35 @@ struct Master *master =  NULL;
 #else 
     master=MasterList[ioctl_param];
     if ( master->id == ioctl_param )
-	  {
-	    specs_dev->firstWriteFifo[ioctl_param]=0;
-	    rc=0; 
-	  }
+      {
+	specs_dev->firstWriteFifo[ioctl_param]=0;
+	rc=0; 
+      }
     else rc=1;
 #endif
     break;
   case IOCTL_RESET :
-    break;  // on ne fait plus de RESET car cela bloque le Kontron (bus Avalon bloqu� ??) , de plus aucun effet sur le fonctionnement.
-    for ( i=0 ; i< NB_MASTER ; i++)
-      {
-	if (( specs_dev->masterIdUsed[i] == 1 ) && ( i != ioctl_param))
-	  {
-	    rc=1;
-	  }
-      }
-    if ( !rc )
+    break;
+    // on ne fait plus de RESET car cela bloque le Kontron (bus Avalon bloqu� ??) , de plus aucun effet sur le fonctionnement.
+    master=MasterList[ioctl_param];
+    if ( master->id == ioctl_param )
       {  
 
 	pReset= (u32*)( specs_dev->bar[BAR2]+ RESET);
-	iowrite32(0xFFFF, pReset);
+        // IL FAUT RESETER LE BIT CORRESPONDANT
+	valReset = ( 1 <<  ioctl_param);
+	iowrite32(valReset, pReset);
 	iowrite32(0x0000, pReset);
 	
 	do {
-	iowrite32(0x0000, pReset);
-	printk(KERN_INFO DRV_NAME " Reset niveau haut \n");
+	  iowrite32(0x0000, pReset);
+	  printk(KERN_INFO DRV_NAME " Reset niveau haut \n");
 	
 	}while (ioread32 (pReset) != 0 );
 		
-	udelay(50);
+	udelay(5);
       }
-     break;
+    break;
   default:
     printk(KERN_INFO DRV_NAME " Unknown command \n");
     rc=1;
@@ -1154,10 +1136,10 @@ struct Master *master =  NULL;
  * @param buf char pointer allocated by the user programm
  * @param count number of bytes to be copied in buf
  * @param pos offset in octets
-   @retval  count number of bytes read (return to the user), if < 0 error
- */
+ @retval  count number of bytes read (return to the user), if < 0 error
+*/
 static ssize_t specs_dev_read(struct file *file, char __user *buf, size_t count,
-		       loff_t *pos)
+			      loff_t *pos)
 {
   
 	
@@ -1168,8 +1150,8 @@ static ssize_t specs_dev_read(struct file *file, char __user *buf, size_t count,
  * @param buf char pointer allocated by the user programm
  * @param count number of bytes to be copied in buf
  * @param pos offset in octets
-  @retval  count number of bytes read from user space , < 0 if error.
- */
+ @retval  count number of bytes read from user space , < 0 if error.
+*/
 static ssize_t specs_dev_write(struct file *file, const char __user *buf, size_t count, loff_t *pos) {
 
   return 0;
@@ -1179,16 +1161,16 @@ static ssize_t specs_dev_write(struct file *file, const char __user *buf, size_t
  * @details Called when the device goes from used to unused. called by close() in user programm
  * @param inode struct inode
  * @param file struct file
-   @retval  0
- */
+ @retval  0
+*/
 static int specs_dev_close(struct inode *inode, struct file *file) {
   struct Aria5Specs_dev *specs_dev;
   int i;
   
   specs_dev = SpecsDev;
   /*
-   iowrite32(0xFFFF,&master->pioRegStatus->edge_capture);
-   iowrite32(0,&master->pioRegStatus->interrupt_mask);
+    iowrite32(0xFFFF,&master->pioRegStatus->edge_capture);
+    iowrite32(0,&master->pioRegStatus->interrupt_mask);
   */ 
    
     
@@ -1204,20 +1186,19 @@ static int specs_dev_close(struct inode *inode, struct file *file) {
 	}
       
     }
-  for ( i=0 ; i< NB_MASTER ; i++)
-    printk(KERN_INFO DRV_NAME "  MaxDelay[%d]=%d \n",i,MaxDelay[i]);
+ 
   return 0;
 }
 
 static int specs_dev_mmap(struct file * file, struct vm_area_struct *vma) ;
 static const struct file_operations specs_devfops = { 
- .owner   = THIS_MODULE, 
- .open    = specs_dev_open,
- .ioctl   = specs_dev_ioctl, 
- .release = specs_dev_close,
- .read    = specs_dev_read,
- .write   = specs_dev_write,
- .mmap    = specs_dev_mmap, 
+  .owner   = THIS_MODULE, 
+  .open    = specs_dev_open,
+  .ioctl   = specs_dev_ioctl, 
+  .release = specs_dev_close,
+  .read    = specs_dev_read,
+  .write   = specs_dev_write,
+  .mmap    = specs_dev_mmap, 
 };
 
 /** @details memory mapping of the virtuel memory for the user programm called by mmap( function not used)
@@ -1245,7 +1226,7 @@ static int specs_dev_mmap(struct file * file, struct vm_area_struct *vma) {
   if ( size > max_size )
     {
       printk(KERN_INFO DRV_NAME " size of mmap() to big max :%x \n",max_size);
-     return -EAGAIN;
+      return -EAGAIN;
     }  
   //  mem_addr = virt_to_phys(specs_dev->virtual_mem); pour le dma
 #ifdef DEBUG_PCI
@@ -1269,17 +1250,17 @@ static int specs_dev_init(struct Aria5Specs_dev *specs_dev) {
   int rc;
   printk(KERN_INFO DRV_NAME " specs_devinit()\n");
  
-if (major)
-  {
-    specs_dev->cdevno= MKDEV(major,specs_dev->minor);
-    rc =register_chrdev_region(specs_dev->cdevno,1,DRV_NAME);
-  }
- else
-   {  /* allocate a dynamically allocated character device node for 1srt device */
-     rc = alloc_chrdev_region(&specs_dev->cdevno, specs_dev->minor , 1,DRV_NAME);
-     major =MAJOR(specs_dev->cdevno);
+  if (major)
+    {
+      specs_dev->cdevno= MKDEV(major,specs_dev->minor);
+      rc =register_chrdev_region(specs_dev->cdevno,1,DRV_NAME);
+    }
+  else
+    {  /* allocate a dynamically allocated character device node for 1srt device */
+      rc = alloc_chrdev_region(&specs_dev->cdevno, specs_dev->minor , 1,DRV_NAME);
+      major =MAJOR(specs_dev->cdevno);
    
-   }
+    }
   /* allocation failed? */
   if (rc < 0) {
     printk(KERN_ALERT DRV_NAME "alloc_chrdev_region() = %d\n", rc);
@@ -1327,11 +1308,11 @@ static void specs_dev_exit(struct Aria5Specs_dev *specs_dev) {
  * @see LDD3 page 311
  */
 static struct pci_driver pci_driver = { 
-.name = DRV_NAME,
-.id_table = ids,
-.probe = probe, 
-.remove = remove ,
-					/* resume, suspend are optional */
+  .name = DRV_NAME,
+  .id_table = ids,
+  .probe = probe, 
+  .remove = remove ,
+  /* resume, suspend are optional */
 };
 
 /**
@@ -1339,15 +1320,15 @@ static struct pci_driver pci_driver = {
  */
 static int __init AltSpecsV2_init(void) {
   int rc = 0;
-//struct pci_dev *dev;
+  //struct pci_dev *dev;
   printk(KERN_INFO DRV_NAME " init(), built at " __DATE__ " " __TIME__ "\n");
   /* register this driver with the PCI bus driver */
-   rc = pci_register_driver(&pci_driver);
+  rc = pci_register_driver(&pci_driver);
   if (rc < 0) 
     { 
       printk(KERN_ALERT DRV_NAME " : unable to register PCI driver\n");
       unregister_chrdev(major, DRV_NAME);
-    return rc;
+      return rc;
     }
   return 0;
  
@@ -1361,8 +1342,8 @@ static void __exit AltSpecsV2_exit(void) {
   /* unregister this driver from the PCI bus driver */
   pci_unregister_driver(&pci_driver);
 
-   unregister_chrdev(major, DRV_NAME );
-        printk(KERN_INFO DRV_NAME"  successfully unloaded\n");
+  unregister_chrdev(major, DRV_NAME );
+  printk(KERN_INFO DRV_NAME"  successfully unloaded\n");
 
 }
 
