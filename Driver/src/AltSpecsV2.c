@@ -866,12 +866,12 @@ static int specs_dev_ioctl(struct inode *inode, struct file *file,
 	    if (level_fifo > 0)  
 	      {
 		printk(KERN_INFO DRV_NAME "Fifo avec %d octets avant ecriture\n",level_fifo);
-		rc = -2;
+		rc = 2;
 		break;
 	      }
 	    // on ecrit les donnees dans la fifo
 	    pBuf32=(u32*)pBusIop.Buffer;
-	    for (i=0; i< pBusIop.TransferSize ; i++)
+	       for (i=0; i< pBusIop.TransferSize ; i++)
 	      { 
 		iowrite32( pBuf32[i],(master->fifoEmiOut ) );
 	       
@@ -885,6 +885,7 @@ static int specs_dev_ioctl(struct inode *inode, struct file *file,
 	    iowrite32((0x4000 |  status),&master->pioRegCtrl->data_status);
 
 	    // attente du 3eme bit du status register indiquant la fin de trame de fla fifo
+	     
 	    for (i=0 ;i < 10000 ;i++) 
 	      {
 		status_reg = ioread32(&master->pioRegStatus->data_status);
@@ -893,10 +894,10 @@ static int specs_dev_ioctl(struct inode *inode, struct file *file,
 		  break;
 		}
 	      }
-	   
+	    
 	    if ( i== 10000){
 	      printk(KERN_INFO DRV_NAME " FIFO non videe \n");
-	      rc=-2;
+	      rc=2;
 	    }
 	    iowrite32(( 0xFFFF8FFF & status),&master->pioRegCtrl->data_status);
 	  
@@ -984,26 +985,7 @@ static int specs_dev_ioctl(struct inode *inode, struct file *file,
     printk(KERN_INFO DRV_NAME " FIFO %d level %d %d \n",k,ioread32 (&master->fifoRecIn_Status->fill_level),ioread32 (&master->fifoRecIn_Status->fill_level));
     printk(KERN_INFO DRV_NAME " FIFO %d level %d %d \n",k,ioread32 (&master->fifoRecIn_Status->fill_level),ioread32 (&master->fifoEmiOut_Status->fill_level));
 #endif 
-    /*
-      int reset;
-      reset= ( 1 << k);
-      pReset= (u32*) (specs_dev->bar[BAR2]+ RESET);
-      printk(KERN_INFO DRV_NAME " RESET one %x = %x\n",pReset,reset);	
-      iowrite32(reset, pReset);
-      iowrite32(0x0000, pReset);
-	
-      do {
-      iowrite32(0x0000, pReset);
-      printk(KERN_INFO DRV_NAME " Reset one niveau haut \n");
-	
-      }while (ioread32 (pReset) != 0 );
-    */	
-	
-		
-    //iowrite32(0x0000, pReset);
-	
-
-    // udelay(50);	
+   	
 			  
     iowrite32((0x00000000 ),&master->pioRegCtrl->direction);
     // reset FIFOS 	
@@ -1101,9 +1083,10 @@ static int specs_dev_ioctl(struct inode *inode, struct file *file,
 #endif
     break;
   case IOCTL_RESET :
-    break;
+   
     // on ne fait plus de RESET car cela bloque le Kontron (bus Avalon bloqué ??) , de plus aucun effet sur le fonctionnement.
     master=MasterList[ioctl_param];
+
     if ( master->id == ioctl_param )
       {  
 
@@ -1111,17 +1094,16 @@ static int specs_dev_ioctl(struct inode *inode, struct file *file,
         // IL FAUT RESETER LE BIT CORRESPONDANT
 	valReset = ( 1 <<  ioctl_param);
 	iowrite32(valReset, pReset);
-	iowrite32(0x0000, pReset);
 	
 	do {
 	  iowrite32(0x0000, pReset);
-	  printk(KERN_INFO DRV_NAME " Reset niveau haut \n");
+	  printk(KERN_INFO DRV_NAME " Reset FIFO emssion %d \n",ioctl_param);
 	
 	}while (ioread32 (pReset) != 0 );
 		
 	udelay(5);
       }
-    break;
+     break;
   default:
     printk(KERN_INFO DRV_NAME " Unknown command \n");
     rc=1;
