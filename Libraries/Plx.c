@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <sys/ioctl.h>
 #include "AltSpecsV2.h"
+#include "ConsoleUtilities.h"
 #include "Plx.h" 
 #include <sys/time.h>
 
@@ -236,13 +237,13 @@ RETURN_CODE PlxBusIopRead(
   
   if (  (address & MASK_FIFO_IN )  ==  ( FIFO_RECEPTION_IN & MASK_FIFO_IN) )
     {
-      for (i=0;i < 500;i++)
+      for (i=0;i < 30;i++)
 	{
 	  rc=ioctl(Handle,IOCTL_READ_FILL_LEVEL,&IoBuffer);
 	  val = (U32*) IoBuffer.Buffer;
 	  if(*val <  ByteCount)
 	    {
- 	      usleep (50); 
+ 	      usleep (1); 
 	    }
 	  else  {
 	    break;
@@ -314,20 +315,20 @@ RETURN_CODE PlxBusIopWrite( HANDLE       Handle,
   else
     error=ioctl(Handle,IOCTL_BUS_IOP_WRITE,&IoBuffer);
   val = (U32*)IoBuffer.Buffer ;
-  if (error > 0 ) 
+ 
+  if (error == 1 ) 
     return ApiSuccess;  
   else 
-    {
-      if (error == -2) 
+    { 
+      
+      err=ioctl(Handle,IOCTL_RESET,masterId);
+      
+      if ( err )
 	{
-	  printf(" On va reset la FIFO il reste qq dedans \n");
-	  err=ioctl(Handle,IOCTL_RESET,masterId);
-	  if ( err )
-	    {
-	      printf("Reset impossible \n");
-	    } 
-	 
-	}    
+	  printf("erreur RESET des FIFOS %d\n",err);
+	  
+	} 
+ 
       return ApiInvalidSize; 
     }
 }
@@ -454,6 +455,7 @@ VOID PlxPciFIFOReset (	HANDLE  handle , U8 masterId )
   int err=0;
  
   err=ioctl(handle,IOCTL_FIFOS_INIT,masterId);
+
   if ( err )
     {
       printf("erreur d'initialisation des FIFOS %d\n",err);
