@@ -1425,12 +1425,10 @@ RETURN_CODE JtagWriteRead(
       return ApiSuccess;
     }
 
-  if ( oper != 0 ) 
-    rc = SpecsmasterReceiverFIFORead(pSpecsslave->pSpecsmaster,
-				     bufSpecsOut, 3);
-  else
-    rc = SpecsmasterReceiverFIFORead(pSpecsslave->pSpecsmaster,
-				     bufSpecsOut, sizeBufSpecs);
+  sizeBufSpecs = 3 + ( nBits - 1 ) / 32 ;
+
+  rc = SpecsmasterReceiverFIFORead(pSpecsslave->pSpecsmaster,
+                                   bufSpecsOut, sizeBufSpecs);
     
   if ( rc != ApiSuccess )
     return rc ;
