@@ -1425,8 +1425,13 @@ RETURN_CODE JtagWriteRead(
       return ApiSuccess;
     }
 
-  rc = SpecsmasterReceiverFIFORead(pSpecsslave->pSpecsmaster,
-                                   bufSpecsOut, sizeBufSpecs);
+  if ( oper != 0 ) 
+    rc = SpecsmasterReceiverFIFORead(pSpecsslave->pSpecsmaster,
+				     bufSpecsOut, 3);
+  else
+    rc = SpecsmasterReceiverFIFORead(pSpecsslave->pSpecsmaster,
+				     bufSpecsOut, sizeBufSpecs);
+    
   if ( rc != ApiSuccess )
     return rc ;
 
