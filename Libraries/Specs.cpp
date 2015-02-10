@@ -1425,8 +1425,11 @@ RETURN_CODE JtagWriteRead(
       return ApiSuccess;
     }
 
+  sizeBufSpecs = 3 + ( nBits - 1 ) / 32 ;
+
   rc = SpecsmasterReceiverFIFORead(pSpecsslave->pSpecsmaster,
                                    bufSpecsOut, sizeBufSpecs);
+    
   if ( rc != ApiSuccess )
     return rc ;
 
