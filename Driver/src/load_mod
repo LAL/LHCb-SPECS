@@ -9,7 +9,7 @@ then
   group="z5"
 fi
 
-mode="664"
+mode="666"
 /sbin/rmmod $module
 # invoke insmod with all arguments we got
 # and use a pathname, as newer modutils don't look in . by default
@@ -32,14 +32,13 @@ do
 		for nombre in 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 
 		do
                 mknod /dev/${device}Master$nombre c ${val} $i 
+                chgrp $group /dev/${device}Master$nombre
+                chmod $mode  /dev/${device}Master$nombre
 		let "i=	$i + 1"
 		done
 	fi
   fi
   done
-  # give appropriate group/permissions, and change the group.
 
-  chgrp $group /dev/${device}Master[0-16]
-  chmod $mode  /dev/${device}Master[0-16]
 
 

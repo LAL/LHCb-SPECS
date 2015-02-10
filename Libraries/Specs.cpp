@@ -129,8 +129,6 @@ void SpecsmasterReset(SPECSMASTER * pSpecsmaster)
 {
  
   if ( PlxPciBoardReset(pSpecsmaster->hdle,pSpecsmaster->masterID) == ApiSuccess)
-
- 
     PlxPciFIFOReset(pSpecsmaster->hdle,pSpecsmaster->masterID);
  
   return;
