@@ -449,6 +449,7 @@ int  PlxPciBoardReset (	HANDLE  handle , U8 masterId )
     } 
   return ApiSuccess;
 }
+
 VOID PlxPciFIFOReset (	HANDLE  handle , U8 masterId )
 {
   int err=0;
