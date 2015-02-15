@@ -42,7 +42,7 @@ extern int errno ;
 #define SpecsUserMajorVersion 9
 #define SpecsUserMinorVersion 0
 
-static struct timespec LockDelay = { 1 , 0 } ;
+static struct timespec LockDelay = { 3 , 0 } ;
 
 // Delay to wait for Slave interrupt
 static unsigned int ItDelay = 100 ;
@@ -160,7 +160,8 @@ void stopSpecsUser( void ) {
 //========================================================================
 // Function to reserve the Master to protect against concurrent accesses
 //========================================================================
-SpecsError reserveMaster_checkRecursive( SPECSMASTER * theMaster ) {
+SpecsError reserveMaster_checkRecursive( SPECSMASTER * theMaster , 
+                                         unsigned int funcFrom ) {
   struct sembuf operation ;
   int res ;
 
@@ -178,6 +179,7 @@ SpecsError reserveMaster_checkRecursive( SPECSMASTER * theMaster ) {
         if ( EINTR == errno ) {
           retry = true ;
         } else {
+          printf( "Recursive, calling function %d \n" , funcFrom ) ;
           perror("") ; return SpecsMasterLocked ; 
         }
       } 
@@ -188,7 +190,8 @@ SpecsError reserveMaster_checkRecursive( SPECSMASTER * theMaster ) {
 
 // Without checking recursivity
 
-SpecsError reserveMaster( SPECSMASTER * theMaster ) {
+SpecsError reserveMaster( SPECSMASTER * theMaster ,
+                          unsigned int fromFunc ) {
   struct sembuf operation ;
   int res ;
 
@@ -205,6 +208,7 @@ SpecsError reserveMaster( SPECSMASTER * theMaster ) {
       if ( EINTR == errno ) {
         retry = true ;
       } else {
+        printf( "Non recursive %d\n" , fromFunc ) ;
         perror("") ; return SpecsMasterLocked ; 
       }
     } 
@@ -294,7 +298,7 @@ SpecsError specs_i2c_write( SPECSSLAVE * theSlave ,
   RETURN_CODE errorCodeFromLowLevelSpecsLib ;
 
   // Wait for master to be free and block it
-  theError = reserveMaster_checkRecursive( theSlave -> pSpecsmaster ) ;
+  theError = reserveMaster_checkRecursive( theSlave -> pSpecsmaster , 0 ) ;
   if ( theError != SpecsSuccess ) return theError ;
 
   errorCodeFromLowLevelSpecsLib = 
@@ -339,7 +343,7 @@ SpecsError specs_i2c_write_sub( SPECSSLAVE * theSlave ,
 
   RETURN_CODE errorCodeFromLowLevelSpecsLib ;
 
-  theError = reserveMaster( theSlave -> pSpecsmaster ) ;
+  theError = reserveMaster( theSlave -> pSpecsmaster , 0 ) ;
   if ( theError != SpecsSuccess ) return theError ;
   
   errorCodeFromLowLevelSpecsLib = 
@@ -368,7 +372,7 @@ SpecsError specs_i2c_general_write( SPECSSLAVE * theSlave ,
   }
   RETURN_CODE errorCodeFromLowLevelSpecsLib ;
 
-  theError = reserveMaster( theSlave -> pSpecsmaster ) ;
+  theError = reserveMaster( theSlave -> pSpecsmaster , 1 ) ;
   if ( theError != SpecsSuccess ) return theError ;
 
   errorCodeFromLowLevelSpecsLib = 
@@ -410,7 +414,7 @@ SpecsError specs_i2c_general_write_sub( SPECSSLAVE * theSlave ,
   }
   RETURN_CODE errorCodeFromLowLevelSpecsLib ;
 
-  theError = reserveMaster( theSlave -> pSpecsmaster ) ;
+  theError = reserveMaster( theSlave -> pSpecsmaster , 2 ) ;
   if ( theError != SpecsSuccess ) return theError ;
 
   errorCodeFromLowLevelSpecsLib = 
@@ -463,7 +467,7 @@ SpecsError specs_i2c_read( SPECSSLAVE * theSlave ,
 
   RETURN_CODE errorCodeFromLowLevelSpecsLib ;
 
-  theError = reserveMaster_checkRecursive( theSlave -> pSpecsmaster ) ;
+  theError = reserveMaster_checkRecursive( theSlave -> pSpecsmaster , 1 ) ;
   if ( theError != SpecsSuccess ) return theError ;
 
   errorCodeFromLowLevelSpecsLib = 
@@ -594,7 +598,7 @@ SpecsError specs_i2c_read_sub(  SPECSSLAVE * theSlave ,
 
   RETURN_CODE errorCodeFromLowLevelSpecsLib ;
 
-  theError = reserveMaster( theSlave -> pSpecsmaster ) ;
+  theError = reserveMaster( theSlave -> pSpecsmaster , 3 ) ;
   if ( theError != SpecsSuccess ) return theError ;
 
   errorCodeFromLowLevelSpecsLib = 
@@ -717,7 +721,7 @@ SpecsError specs_i2c_combinedread(  SPECSSLAVE * theSlave ,
   if ( ! recursiveLock[ theSlave -> pSpecsmaster ] )
     isFromRecursiveLock = false ;
   
-  theError = reserveMaster_checkRecursive( theSlave -> pSpecsmaster ) ;
+  theError = reserveMaster_checkRecursive( theSlave -> pSpecsmaster , 2 ) ;
   if ( theError != SpecsSuccess ) return theError ;
 
   errorCodeFromLowLevelSpecsLib = 
@@ -779,7 +783,7 @@ SpecsError specs_parallel_write(  SPECSSLAVE * theSlave ,
   else if (nValues == 1) 
     /* Select Parallel or DMA following the value of nValues */
   {
-    theError = reserveMaster( theSlave -> pSpecsmaster ) ;
+    theError = reserveMaster( theSlave -> pSpecsmaster , 4 ) ;
     if ( theError != SpecsSuccess ) return theError ;
 
     theSpecsLibError = ParallelWrite (theSlave, address, data[0] );
@@ -805,7 +809,7 @@ SpecsError specs_parallel_write(  SPECSSLAVE * theSlave ,
       pData[2*i] = (U8) ( ( data[i] & 0xFF00 ) >> 8 ) ;
       pData[2*i+1] = (U8) ( data[i] & 0xFF ) ;
     }
-    theError = reserveMaster( theSlave -> pSpecsmaster ) ;
+    theError = reserveMaster( theSlave -> pSpecsmaster , 5 ) ;
     if ( theError != SpecsSuccess ) return theError ;
 
     theSpecsLibError = 
@@ -846,7 +850,7 @@ SpecsError specs_parallel_read ( SPECSSLAVE * theSlave ,
   RETURN_CODE theSpecsLibError ; 
   SPECSMASTER* specsMtr = theSlave->pSpecsmaster ; 
 
-  theError = reserveMaster( specsMtr ) ;
+  theError = reserveMaster( specsMtr , 6 ) ;
   if ( theError != SpecsSuccess ) return theError ;
 
   if (nValues <= 0)
@@ -931,7 +935,7 @@ SpecsError specs_jtag_reset(  SPECSSLAVE * theSlave ,
   tms = 0xF8;
   RETURN_CODE specsLibError ;
 
-  theError = reserveMaster( theSlave -> pSpecsmaster ) ;
+  theError = reserveMaster( theSlave -> pSpecsmaster , 7 ) ;
   if ( theError != SpecsSuccess ) return theError ;
 
   specsLibError =
@@ -973,7 +977,7 @@ SpecsError specs_jtag_idle(  SPECSSLAVE * theSlave ,
   tms = 0x00;
   RETURN_CODE specsLibError ;
 
-  theError = reserveMaster( theSlave -> pSpecsmaster ) ;
+  theError = reserveMaster( theSlave -> pSpecsmaster , 8 ) ;
   if ( theError != SpecsSuccess ) return theError ;
 
   specsLibError =
@@ -1045,7 +1049,7 @@ SpecsError specs_register_write( SPECSSLAVE * theSlave ,
  
   RETURN_CODE errorCodeFromLowLevelSpecsLib ;
 
-  theError = reserveMaster_checkRecursive( theSlave -> pSpecsmaster ) ;
+  theError = reserveMaster_checkRecursive( theSlave -> pSpecsmaster , 3 ) ;
   if ( theError != SpecsSuccess ) return theError ;
  
   errorCodeFromLowLevelSpecsLib = RegisterWrite(theSlave, theRegister,
@@ -1086,7 +1090,7 @@ SpecsError specs_register_read( SPECSSLAVE * theSlave ,
 
   RETURN_CODE errorCodeFromLowLevelSpecsLib ;
 
-  theError = reserveMaster_checkRecursive( theSlave -> pSpecsmaster ) ;
+  theError = reserveMaster_checkRecursive( theSlave -> pSpecsmaster , 4 ) ;
   if ( theError != SpecsSuccess ) return theError ;
 
   errorCodeFromLowLevelSpecsLib = RegisterRead(theSlave,theRegister,data);	
@@ -1131,7 +1135,7 @@ SpecsError specs_slave_internal_reset(  SPECSSLAVE * theSlave ) {
   if ( 0 == theSlave ) return InvalidParameter ;
 
   SpecsError theError ;  
-  theError = reserveMaster( theSlave -> pSpecsmaster ) ;
+  theError = reserveMaster( theSlave -> pSpecsmaster , 9 ) ;
   if ( theError != SpecsSuccess ) return theError ;
 
   recursiveLock[ theSlave -> pSpecsmaster ] = true ;
@@ -1163,7 +1167,7 @@ SpecsError specs_slave_external_reset(  SPECSSLAVE * theSlave ) {
   if ( 0 == theSlave ) return InvalidParameter ;
   SpecsError theError ;
 
-  theError = reserveMaster( theSlave -> pSpecsmaster ) ;
+  theError = reserveMaster( theSlave -> pSpecsmaster , 10 ) ;
   if ( theError != SpecsSuccess ) return theError ;
 
   recursiveLock[ theSlave -> pSpecsmaster ] = true ;
@@ -1197,7 +1201,7 @@ SpecsError specs_slave_external_shortreset(  SPECSSLAVE * theSlave ) {
   if ( 0 == theSlave ) return InvalidParameter ;
   SpecsError theError ;
 
-  theError = reserveMaster( theSlave -> pSpecsmaster ) ;
+  theError = reserveMaster( theSlave -> pSpecsmaster , 11 ) ;
   if ( theError != SpecsSuccess ) return theError ;
 
   recursiveLock[ theSlave -> pSpecsmaster ] = true ;
@@ -1244,7 +1248,7 @@ SpecsError specs_master_softreset( SPECSMASTER * theMaster ) {
   U32 status ;
   unsigned short address ;
 
-  theError = reserveMaster_checkRecursive( theMaster ) ;
+  theError = reserveMaster_checkRecursive( theMaster ,5 ) ;
   if ( theError != SpecsSuccess ) return theError ;
 
   // empty the FIFO
@@ -1585,7 +1589,7 @@ SpecsError specs_dcu_register_write(  SPECSSLAVE * theSlave ,
   SpecsError theError = SpecsSuccess ;
 
   if ( ! recursiveLock[ theSlave -> pSpecsmaster ] ) fromRecursiveLock = false ;
-  theError = reserveMaster_checkRecursive( theSlave -> pSpecsmaster ) ;
+  theError = reserveMaster_checkRecursive( theSlave -> pSpecsmaster , 6 ) ;
   if ( theError != SpecsSuccess ) return theError ;
   
   initialSpeed = getSpeed( theSlave -> pSpecsmaster ) ;
@@ -1639,7 +1643,7 @@ SpecsError specs_dcu_register_read(  SPECSSLAVE * theSlave ,
   U8 initialSpeed , isInitialMasked ;
   SpecsError theError = SpecsSuccess ;
   
-  theError = reserveMaster_checkRecursive( theSlave -> pSpecsmaster ) ;
+  theError = reserveMaster_checkRecursive( theSlave -> pSpecsmaster , 7 ) ;
   if ( theError != SpecsSuccess ) return theError ;
 
   if ( !   recursiveLock[ theSlave -> pSpecsmaster ] )
@@ -1700,7 +1704,7 @@ SpecsError specs_dcu_acquire(  SPECSSLAVE * theSlave  ,
   int nIter ;
   U8 initialSpeed , isInitialMasked ;
 
-  readError = reserveMaster( theSlave -> pSpecsmaster ) ;
+  readError = reserveMaster( theSlave -> pSpecsmaster , 12 ) ;
   if ( readError != SpecsSuccess ) return readError ;
 
   initialSpeed = getSpeed( theSlave -> pSpecsmaster ) ;
@@ -1936,7 +1940,7 @@ SpecsError specs_dcu_reset(  SPECSSLAVE * theSlave ) {
   SpecsError readError = SpecsSuccess ;
   U8 initialSpeed , isInitialMasked ;
 
-  readError = reserveMaster( theSlave -> pSpecsmaster ) ;
+  readError = reserveMaster( theSlave -> pSpecsmaster , 13 ) ;
   if ( readError != SpecsSuccess ) return readError ;
 
   initialSpeed = getSpeed( theSlave -> pSpecsmaster ) ;
@@ -2010,7 +2014,7 @@ SpecsError specs_dcu_initialize(  SPECSSLAVE * theSlave ) {
   SpecsError readError = SpecsSuccess ;
   U8 initialSpeed , isInitialMasked ;
 
-  readError = reserveMaster( theSlave -> pSpecsmaster ) ;
+  readError = reserveMaster( theSlave -> pSpecsmaster , 14 ) ;
   if ( readError != SpecsSuccess ) return readError ;
 
   initialSpeed = getSpeed( theSlave -> pSpecsmaster ) ;
@@ -2117,7 +2121,7 @@ SpecsError specs_dcu_set_LIR(  SPECSSLAVE * theSlave ) {
   SpecsError readError = SpecsSuccess ;
   U8 initialSpeed , isInitialMasked ;
 
-  readError = reserveMaster( theSlave -> pSpecsmaster ) ;
+  readError = reserveMaster( theSlave -> pSpecsmaster , 15 ) ;
   if ( readError != SpecsSuccess ) return readError ;
     
   initialSpeed = getSpeed( theSlave -> pSpecsmaster ) ;
@@ -2192,7 +2196,7 @@ SpecsError specs_dcu_set_HIR(  SPECSSLAVE * theSlave ) {
   SpecsError readError = SpecsSuccess ;
   U8 initialSpeed , isInitialMasked ;
   
-  readError = reserveMaster( theSlave -> pSpecsmaster ) ;
+  readError = reserveMaster( theSlave -> pSpecsmaster , 16 ) ;
   if ( readError != SpecsSuccess ) return readError ;
   
   initialSpeed = getSpeed( theSlave -> pSpecsmaster ) ;
@@ -2407,7 +2411,7 @@ SpecsError JtagWriteReadMany( SPECSSLAVE * pSpecsslave, U8 outSelect,
     }
     index--;
 
-    theError = reserveMaster( pSpecsslave -> pSpecsmaster ) ;
+    theError = reserveMaster( pSpecsslave -> pSpecsmaster , 17 ) ;
     if ( theError != SpecsSuccess ) return theError ;
 
     for(i = index; i >= 0 ; i--)
@@ -2452,7 +2456,7 @@ SpecsError JtagWriteReadMany( SPECSSLAVE * pSpecsslave, U8 outSelect,
   } 
   else
   {
-    theError = reserveMaster( pSpecsslave -> pSpecsmaster ) ;
+    theError = reserveMaster( pSpecsslave -> pSpecsmaster , 18 ) ;
     if ( theError != SpecsSuccess ) return theError ;
 
     ret = JtagWriteRead( pSpecsslave, outSelect,
@@ -2532,7 +2536,7 @@ SpecsError specs_master_setspeed( SPECSMASTER * theMaster , U8 speed ) {
   idMapIterator idIt ;
   U32 n ;
 
-  SpecsError theError = reserveMaster_checkRecursive( theMaster ) ; 
+  SpecsError theError = reserveMaster_checkRecursive( theMaster , 8 ) ; 
   if ( theError != SpecsSuccess ) return theError ;
   
   n = ( SpecsPlxStatusRead( theMaster ) >> 8 ) & 0xFF ;
@@ -2570,7 +2574,7 @@ SpecsError specs_master_maskchecksum( SPECSMASTER * theMaster ) {
   idMapIterator idIt ;
   U32 n ;
   U8 speed ;
-  SpecsError theError = reserveMaster_checkRecursive( theMaster ) ;
+  SpecsError theError = reserveMaster_checkRecursive( theMaster , 9 ) ;
   if ( theError != SpecsSuccess ) return theError ;
 
   n = ( SpecsPlxStatusRead( theMaster ) >> 8 ) & 0xFF ;
@@ -2614,7 +2618,7 @@ SpecsError specs_master_unmaskchecksum( SPECSMASTER * theMaster ) {
   U32 n ;
   U8 speed ;
   
-  SpecsError theError = reserveMaster_checkRecursive( theMaster ) ;
+  SpecsError theError = reserveMaster_checkRecursive( theMaster , 10 ) ;
   if ( theError != SpecsSuccess ) return theError ;
 
   n = ( SpecsPlxStatusRead( theMaster ) >> 8 ) & 0xFF ;
@@ -2669,7 +2673,7 @@ SpecsError specs_slave_write_eeprom( SPECSSLAVE * theSlave , U8 pageNumber ,
   unsigned int i ;
   for ( i = 0 ; i < nValues ; ++i ) newData[ i + 2 ] = data[ i ] ;
   
-  theError = reserveMaster( theSlave -> pSpecsmaster ) ;
+  theError = reserveMaster( theSlave -> pSpecsmaster , 19 ) ;
   if ( theError != SpecsSuccess ) return theError ;
 
   initialSpeed = getSpeed( theSlave -> pSpecsmaster ) ;
@@ -2803,7 +2807,7 @@ SpecsError specs_slave_read_eeprom( SPECSSLAVE * theSlave ,
   if ( !   recursiveLock[ theSlave -> pSpecsmaster ] )
     isFromRecursiveLock = false ;
   
-  theError = reserveMaster_checkRecursive( theSlave -> pSpecsmaster ) ;
+  theError = reserveMaster_checkRecursive( theSlave -> pSpecsmaster , 11 ) ;
   if ( theError != SpecsSuccess ) return theError ;
 
   initialSpeed = getSpeed( theSlave -> pSpecsmaster ) ;
@@ -3134,7 +3138,7 @@ SpecsError specs_register_read_withoutIt( SPECSSLAVE * theSlave ,
 
   RETURN_CODE errorCodeFromLowLevelSpecsLib ;
   if (checkLock ) {
-    theError = reserveMaster( theSlave -> pSpecsmaster ) ;
+    theError = reserveMaster( theSlave -> pSpecsmaster , 20 ) ;
     if ( theError != SpecsSuccess ) return theError ;
   }
   
