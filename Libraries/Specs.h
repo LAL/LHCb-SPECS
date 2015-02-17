@@ -63,30 +63,6 @@ extern "C" {
 SPECS_API U32 BufSpecs[BufSpecsLengthMax];
 SPECS_API PLX_NOTIFY_OBJECT InterTab[MAX_CARD];
 
-#ifdef SPECS_EXPORTS
-  /*
-SPECS_API BOOLEAN Spdemo=FALSE;
-SPECS_API HANDLE EtatDev[MAX_CARD]={(HANDLE)-1,(HANDLE)-1,(HANDLE)-1,(HANDLE)-1,
-                            (HANDLE)-1,(HANDLE)-1};
-SPECS_API U32	 EtatDevCount[MAX_CARD]={0,0,0,0,0,0};
-  */
-SPECS_API BOOLEAN Spdemo=FALSE;
-SPECS_API HANDLE EtatDev[NB_MASTER]={(HANDLE)-1,(HANDLE)-1,(HANDLE)-1,(HANDLE)-1,
-				     (HANDLE)-1,(HANDLE)-1,(HANDLE)-1,(HANDLE)-1,(HANDLE)-1,(HANDLE)-1,
-				     (HANDLE)-1,(HANDLE)-1,(HANDLE)-1,(HANDLE)-1,(HANDLE)-1,(HANDLE)-1,
-				     };
-  SPECS_API U32	 EtatDevCount[NB_MASTER]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
-#else
-  /*MTQ
-SPECS_API BOOLEAN Spdemo;
-SPECS_API HANDLE EtatDev[MAX_CARD];
-SPECS_API U32	 EtatDevCount[MAX_CARD];
-  */
-SPECS_API BOOLEAN Spdemo;
-SPECS_API HANDLE EtatDev[NB_MASTER];
-SPECS_API U32	 EtatDevCount[NB_MASTER];
-#endif
-
 #define JTAG_byteIndex(n)		((n)+3-2*((n)%4))
 #define JTAG_calcNBytes(nBits)	((nBits - 1)/8 + 1)
 #define JTAG_bitsLeft(nBits)		((nBits - 1)%8 + 1)
@@ -132,7 +108,7 @@ SPECS_API void SpecsmasterInit(SPECSMASTER * pSpecsmaster,
 							   UINT MasterID,
 							   HANDLE hdle);
 
-  SPECS_API void SpecsmasterReset(SPECSMASTER * pSpecsmaster);
+SPECS_API void SpecsmasterReset(SPECSMASTER * pSpecsmaster);
 
 SPECS_API RETURN_CODE SpecsmasterEnd(SPECSMASTER * pSpecsmaster);
 

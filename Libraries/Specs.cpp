@@ -107,8 +107,8 @@ void SpecsmasterEnableInt (SPECSMASTER * pSpecsmaster, U32 numIt)
   return;
 }
 void SpecsmasterInit(SPECSMASTER * pSpecsmaster,
-		     UINT MasterID,
-		     HANDLE hdle)
+                     UINT MasterID,
+                     HANDLE hdle)
 {
  
   pSpecsmaster->hdle = hdle;
@@ -400,21 +400,7 @@ RETURN_CODE I2cBufferRead(
    //    SpecsmasterEnableInt ( pSpecsslave-> pSpecsmaster,1);//MTQ
   /*	rc = SpecsmasterEmitterFIFOWrite(pSpecsslave->pSpecsmaster,
 	BufSpecs,Taille);*/
-  if (Spdemo)
-    {
-      i=0;
-      while (i < BufSpecsLengthMax)
-	{
-	  BufSpecs[i] = 0;
-	  i++;
-	}
-      i=0;
-      while (i < Taille)
-	{
-	  BufSpecs[i] = BufSpecslocal[i];
-	  i++;
-	}
-    }
+
   return rc;
 }
 
@@ -477,21 +463,6 @@ RETURN_CODE I2cBufferReadwithSsAdd(
   /*	rc = SpecsmasterEmitterFIFOWrite(pSpecsslave->pSpecsmaster,
 	BufSpecs,Taille);*/
 
-  if (Spdemo)
-    {
-      i=0;
-      while (i < BufSpecsLengthMax)
-	{
-	  BufSpecs[i] = 0;
-	  i++;
-	}
-      i=0;
-      while (i < Taille)
-	{
-	  BufSpecs[i] = BufSpecslocal[i];
-	  i++;
-	}
-    }
   return rc;
 }
 
@@ -549,21 +520,6 @@ RETURN_CODE I2cBufferWrite(
     }
   /*	rc = SpecsmasterEmitterFIFOWrite(pSpecsslave->pSpecsmaster,
 	BufSpecs,Taille);*/
-  if (Spdemo)
-    {
-      i=0;
-      while (i < BufSpecsLengthMax)
-	{
-	  BufSpecs[i] = 0;
-	  i++;
-	}
-      i=0;
-      while (i < Taille)
-	{
-	  BufSpecs[i] = BufSpecslocal[i];
-	  i++;
-	}
-    }
   return rc;
 }
 
@@ -635,21 +591,6 @@ RETURN_CODE I2cEEPROMWrite(
       j=i;
     }
 
-  if (Spdemo)
-    {
-      i=0;
-      while (i < BufSpecsLengthMax)
-	{
-	  BufSpecs[i] = 0;
-	  i++;
-	}
-      i=0;
-      while (i < Taille)
-	{
-	  BufSpecs[i] = BufSpecslocal[i];
-	  i++;
-	}
-    }
   return rc;
 }
 
@@ -689,21 +630,7 @@ RETURN_CODE JtagBufTDIWrite(
   BufSpecslocal[1]=BufSpecslocal[1] | (OutSelect & 0xF);
   rc = SpecsmasterEmitterFIFOWrite(pSpecsslave->pSpecsmaster,
 				   BufSpecslocal,Taille);
-  if (Spdemo)
-    {
-      i=0;
-      while (i < BufSpecsLengthMax)
-	{
-	  BufSpecs[i] = 0;
-	  i++;
-	}
-      i=0;
-      while (i < Taille)
-	{
-	  BufSpecs[i] = BufSpecslocal[i];
-	  i++;
-	}
-    }
+
   return rc;
 }
 
@@ -744,21 +671,7 @@ RETURN_CODE JtagBufTMSWrite(
   rc = SpecsmasterEmitterFIFOWrite(pSpecsslave->pSpecsmaster,
 				   BufSpecslocal,Taille);
   SpecsmasterStartWrite ( pSpecsslave->pSpecsmaster);
-  if (Spdemo)
-    {
-      i=0;
-      while (i < BufSpecsLengthMax)
-	{
-	  BufSpecs[i] = 0;
-	  i++;
-	}
-      i=0;
-      while (i < Taille)
-	{
-	  BufSpecs[i] = BufSpecslocal[i];
-	  i++;
-	}
-    }
+ 
   return rc;
 }
 
@@ -786,20 +699,6 @@ RETURN_CODE ParallelWrite(
   rc = SpecsmasterEmitterFIFOWrite(pSpecsslave->pSpecsmaster,
 				   BufSpecslocal,3);
   SpecsmasterStartWrite ( pSpecsslave->pSpecsmaster);
-  if (Spdemo)
-    {
-      while (i < BufSpecsLengthMax)
-	{
-	  BufSpecs[i] = 0;
-	  i++;
-	}
-      i=0;
-      while (i < 3)
-	{
-	  BufSpecs[i] = BufSpecslocal[i];
-	  i++;
-	}
-    }
   return rc;
 }
 
@@ -828,20 +727,6 @@ RETURN_CODE ParallelRead(
 				   BufSpecslocal,3);
   SpecsmasterEnableInt ( pSpecsslave-> pSpecsmaster,1);//MTQ
   SpecsmasterStartWrite ( pSpecsslave->pSpecsmaster);
-  if (Spdemo)
-    {
-      while (i < BufSpecsLengthMax)
-	{
-	  BufSpecs[i] = 0;
-	  i++;
-	}
-      i=0;
-      while (i < 3)
-	{
-	  BufSpecs[i] = BufSpecslocal[i];
-	  i++;
-	}
-    }
   return rc;
 }
 
@@ -888,21 +773,6 @@ RETURN_CODE ParallelDMAWrite(
   rc = SpecsmasterEmitterFIFOWrite(pSpecsslave->pSpecsmaster,
 				   BufSpecslocal,Taille);
   SpecsmasterStartWrite ( pSpecsslave->pSpecsmaster);
-  if (Spdemo)
-    {
-      i=0;
-      while (i < BufSpecsLengthMax)
-	{
-	  BufSpecs[i] = 0;
-	  i++;
-	}
-      i=0;
-      while (i < Taille)
-	{
-	  BufSpecs[i] = BufSpecslocal[i];
-	  i++;
-	}
-    }
 
   return rc;
 }
@@ -950,20 +820,6 @@ RETURN_CODE ParallelDMARead(
 				   BufSpecslocal,3);
   SpecsmasterEnableInt ( pSpecsslave-> pSpecsmaster,1);//MTQ
   SpecsmasterStartWrite ( pSpecsslave->pSpecsmaster);
-  if (Spdemo)
-    {
-      while (i < BufSpecsLengthMax)
-	{
-	  BufSpecs[i] = 0;
-	  i++;
-	}
-      i=0;
-      while (i < 3)
-	{
-	  BufSpecs[i] = BufSpecslocal[i];
-	  i++;
-	}
-    }
 
   return rc;
 }
@@ -991,20 +847,7 @@ RETURN_CODE RegisterWrite(
   rc = SpecsmasterEmitterFIFOWrite(pSpecsslave->pSpecsmaster,
 				   BufSpecslocal,3);
   SpecsmasterStartWrite ( pSpecsslave->pSpecsmaster);
-  if (Spdemo)
-    {
-      while (i < BufSpecsLengthMax)
-	{
-	  BufSpecs[i] = 0;
-	  i++;
-	}
-      i=0;
-      while (i < 3)
-	{
-	  BufSpecs[i] = BufSpecslocal[i];
-	  i++;
-	}
-    }
+
   return rc;
 }
 
@@ -1034,20 +877,6 @@ RETURN_CODE RegisterRead(
   SpecsmasterEnableInt ( pSpecsslave-> pSpecsmaster,1);//MTQ
   SpecsmasterStartWrite ( pSpecsslave->pSpecsmaster);
  
-if (Spdemo)
-    {
-      while (i < BufSpecsLengthMax)
-	{
-	  BufSpecs[i] = 0;
-	  i++;
-	}
-      i=0;
-      while (i < 3)
-	{
-	  BufSpecs[i] = BufSpecslocal[i];
-	  i++;
-	}
-    }
   return rc;
 }
 
