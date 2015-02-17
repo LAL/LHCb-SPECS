@@ -69,14 +69,8 @@
 SpecsTestFunction * test ;
 SPECSMASTER theMaster , theMaster2 ;
 
-//void INThandler( int ) ;
 
 int main( int argc , char ** argv ) {
-  // Initialise
-  //  ConsoleInitialize( ) ;
-  //  Cls( ) ;
-
-//  signal( SIGINT , INThandler ) ;
 
   srand( (unsigned) time( NULL ) ) ;
 
@@ -85,7 +79,6 @@ int main( int argc , char ** argv ) {
     printf( " Usage <Card> <Master> <Slave> <Test> <NEvents> " ) ;
     printf( "(<Slave #2>)\n" ) ;
     printf( "\n\n\n" ) ;
-    //    ConsoleFinalize() ;
     exit(0);
   }
 
@@ -98,7 +91,6 @@ int main( int argc , char ** argv ) {
   if ( ( ( 24 == testNumber ) || ( 38 == testNumber ) || ( testNumber > 40 ) ) 
        && ( 6 == argc ) ) {
     printf( "Needs additional argument !\n" ) ;
-    //    ConsoleFinalize() ;
     exit( 0 ) ;
   }
 
@@ -113,7 +105,6 @@ int main( int argc , char ** argv ) {
   
   if ( 0 == nSpecs ) {
     printf( "No SPECS MASTER Card found \n" ) ;
-    //    ConsoleFinalize( ) ;
     exit( 0 ) ;
   }
   
@@ -129,7 +120,6 @@ int main( int argc , char ** argv ) {
   
   if ( SpecsSuccess != theSpError ) {
     printf( " Error Opening Specs with code = %X \n" , theSpError ) ;
-    //    ConsoleFinalize() ;
     exit( 0 ) ;
   }
   

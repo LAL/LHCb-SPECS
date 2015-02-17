@@ -39,8 +39,8 @@ extern int errno ;
 #include "AltSpecsV2.h"
 #define GLOBAL_REG PIO_STATUS_REG
 // Version of the library
-#define SpecsUserMajorVersion 9
-#define SpecsUserMinorVersion 0
+#define SpecsUserMajorVersion 13
+#define SpecsUserMinorVersion 4
 
 static struct timespec LockDelay = { 3 , 0 } ;
 
@@ -62,16 +62,23 @@ static const U8 EEPROMAddress = 0x53 ;
 // DCU Speed
 static const U8 DCUSpeed = 3 ;
 
+// Arrays for bookkeeping of opening/closing of masters
+static SPECSMASTER *EtatDev[NB_MASTER]={0, 0, 0, 0,
+                                       0, 0, 0, 0,
+                                       0, 0, 0, 0,
+                                       0, 0, 0, 0 };
+static U32 EtatDevCount[NB_MASTER]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+
 // Utility functions...
 // Check Validity of parameters at the begining of each function
-SpecsError  specsUserCheckParameters(  SPECSSLAVE * theSlave );
+SpecsError specsUserCheckParameters(  SPECSSLAVE * theSlave );
 // READ Receiver FIFO of the Specs
-SpecsError  specsUserFIFORead( SPECSMASTER * pSpecsmaster, U32 *pData,
+SpecsError specsUserFIFORead( SPECSMASTER * pSpecsmaster, U32 *pData,
                                U32 Length);
 // JTAG intermediate function
-SpecsError  JtagWriteReadMany( SPECSSLAVE * pSpecsslave, U8 outSelect,
-                               U8 *pDataIn, U8 *pDataOut, U32 nBits,
-                               JTAG_OPER oper, int header, int trailler);
+SpecsError JtagWriteReadMany( SPECSSLAVE * pSpecsslave, U8 outSelect,
+                              U8 *pDataIn, U8 *pDataOut, U32 nBits,
+                              JTAG_OPER oper, int header, int trailler);
 // Read speed of the Master
 U8 getSpeed( SPECSMASTER * theMaster ) ;
 
@@ -91,54 +98,44 @@ SpecsError specs_register_read_withoutIt( SPECSSLAVE * theSlave ,
 bool specsCreateSemaphore( bool * semExists , int * semId ,
                            std::string inputKey ,
                            int secondaryKey , int nSem , 
-                           std::map< SPECSMASTER * , int > * theMap , 
+                           std::map< U32 , int > * theMap , 
                            SPECSMASTER * theMasterCard ) ;
 
 struct compPair {
-  bool operator()( const std::pair< SPECSMASTER * , unsigned short > &p1 , 
-                   const std::pair< SPECSMASTER * , unsigned short > &p2 ) 
+  bool operator()( const std::pair< U32 , unsigned short > &p1 ,
+                   const std::pair< U32 , unsigned short > &p2 ) 
     const {
     if ( p1.first != p2.first ) return p1.first < p2.first ;
     else return p1.second < p2.second ;
   }
 } ;
 
-// Map to contain Master Id for each specs master
-std::map< SPECSMASTER * , unsigned short > idMap ;
-typedef std::map< SPECSMASTER * , unsigned short >::iterator idMapIterator ;
-
 // Map for recursive locks
-std::map< SPECSMASTER * , bool > recursiveLock ;
+std::map< U32 , bool > recursiveLock ;
 
 // Map for semaphores
-std::map< SPECSMASTER * , int > mutexMap ;
-typedef std::map< SPECSMASTER * , int >::iterator mutexMapIterator ;
+std::map< U32 , int > mutexMap ;
+typedef std::map< U32 , int >::iterator mutexMapIterator ;
 
 // Map to contain IT2 events for each master
-std::map< SPECSMASTER * , PLX_NOTIFY_OBJECT > intEventMap ;
-typedef std::map< SPECSMASTER * , PLX_NOTIFY_OBJECT >::iterator 
-intEventMapIterator ;
+std::map< U32 , PLX_NOTIFY_OBJECT > intEventMap ;
+typedef std::map< U32 , PLX_NOTIFY_OBJECT >::iterator intEventMapIterator ;
 
 PLX_INTR IntSources ;
-
-std::map< SPECSMASTER * , std::string > serialIdMap ;
   
 static void startSpecsUser(void) __attribute__ ((constructor));
 static void stopSpecsUser(void) __attribute__ ((destructor));
 void stopSpecsUser_signal( int s ) ;
 void startSpecsUser(void) {
-
-  idMap.clear() ;
   intEventMap.clear() ;
-
 
   memset( &IntSources , 0 , sizeof( PLX_INTR ) ) ;
   // MTQ N'est plus utilise    IntSources.IopToPciInt_2 = 1 ;
   //  IntSources.PIO_Line =0x01000008;
   IntSources.PIO_Line =0x01;
   signal( SIGINT , stopSpecsUser_signal ) ;
-
 }
+
 void stopSpecsUser_signal( int s ) 
 {
   stopSpecsUser( ) ;
@@ -149,12 +146,13 @@ void stopSpecsUser( void ) {
   int MasterId;
  
   for (MasterId =0; MasterId<NB_MASTER;MasterId ++)
-    if (EtatDev[MasterId] != -1) 
-      //specs_master_close( idMap[MasterId]);
-      { printf(" Close Master %d  \n",MasterId+1);
-	PlxPciDeviceClose(EtatDev[MasterId],MasterId);
-	EtatDev[MasterId]= -1;
-      }
+    if ( 0 != EtatDev[MasterId] ) 
+    { 
+      printf(" Close Master %d pointer %d \n",MasterId+1,
+             EtatDev[ MasterId ] );
+      specs_master_close( EtatDev[ MasterId ] ) ;
+      EtatDev[MasterId]= 0;
+    }
 }
 
 //========================================================================
@@ -165,7 +163,7 @@ SpecsError reserveMaster_checkRecursive( SPECSMASTER * theMaster ,
   struct sembuf operation ;
   int res ;
 
-  if ( ! recursiveLock[ theMaster ] ) {
+  if ( ! recursiveLock[ theMaster -> masterID ] ) {
     operation.sem_num = 0 ;
     operation.sem_op  = -1 ;
     operation.sem_flg = SEM_UNDO ;
@@ -173,13 +171,14 @@ SpecsError reserveMaster_checkRecursive( SPECSMASTER * theMaster ,
     bool retry = true ;
     while ( retry ) {
       retry = false ;
-      res = semtimedop( mutexMap[ theMaster ] , &operation , 1 , 
+      res = semtimedop( mutexMap[ theMaster -> masterID ] , &operation , 1 , 
                         &LockDelay ) ;
       if ( res < 0 ) { // is interrupted system call, retry 
         if ( EINTR == errno ) {
           retry = true ;
         } else {
-          printf( "Recursive, calling function %d \n" , funcFrom ) ;
+          printf( "Recursive, calling function %d, master %d \n" , funcFrom , 
+                  theMaster ) ;
           perror("") ; return SpecsMasterLocked ; 
         }
       } 
@@ -202,7 +201,7 @@ SpecsError reserveMaster( SPECSMASTER * theMaster ,
   bool retry = true ;
   while ( retry ) {
     retry = false ;
-    res = semtimedop( mutexMap[ theMaster ] , &operation , 1 , 
+    res = semtimedop( mutexMap[ theMaster -> masterID ] , &operation , 1 , 
                       &LockDelay ) ;
     if ( res < 0 ) { // is interrupted system call, retry 
       if ( EINTR == errno ) {
@@ -223,15 +222,16 @@ SpecsError releaseMaster_checkRecursive( SPECSMASTER * theMaster ) {
   struct sembuf operation ;
   int res ;
 
-  if ( ! recursiveLock[ theMaster ] ) {
+  if ( ! recursiveLock[ theMaster -> masterID ] ) {
     operation.sem_num = 0 ;
     operation.sem_op  = 1 ;
     operation.sem_flg = SEM_UNDO ;
-    res = semop( mutexMap[ theMaster ] , &operation , 1 ) ;
+    res = semop( mutexMap[ theMaster -> masterID ] , &operation , 1 ) ;
   }
 
   return SpecsSuccess ;
 }
+
 // without recursivity check
 SpecsError releaseMaster( SPECSMASTER * theMaster ) {
   struct sembuf operation ;
@@ -241,7 +241,7 @@ SpecsError releaseMaster( SPECSMASTER * theMaster ) {
   operation.sem_op  = 1 ;
   operation.sem_flg = SEM_UNDO ;
   
-  res = semop( mutexMap[ theMaster ] , &operation , 1 ) ;
+  res = semop( mutexMap[ theMaster -> masterID ] , &operation , 1 ) ;
 
   return SpecsSuccess ;
 }
@@ -261,27 +261,17 @@ unsigned short specs_minor_version( ) {
 }
 
 //========================================================================
-//
+// for backward compatibility
 //========================================================================
 unsigned int specs_master_serialNumber( SPECSMASTER * theMasterCard ) { 
-  U32 EepromData[ 4 ] ;
-  for ( int ii = 0 ; ii < 4 ; ++ii ) EepromData[ ii ] = 0 ;
-  unsigned int serId ;
-  serId = EepromData[ 3 ] ;
-  serId=0;
-  return serId ;  
+  return 999 ;  
 }
 
 //========================================================================
-//
+// for backward compatibility
 //========================================================================
 unsigned int board_serialNumber( HANDLE * hdle ) {
-  U32 EepromData[ 4 ] ;
-  for ( int ii = 0 ; ii < 4 ; ++ii ) EepromData[ ii ] = 0 ;
-  unsigned int serId ;
-  serId = EepromData[ 3 ] ;
-  serId=0;//MTQ
-  return serId ;  
+  return 999 ;  
 }
 
 //========================================================================
@@ -314,7 +304,6 @@ SpecsError specs_i2c_write( SPECSSLAVE * theSlave ,
   case ApiAccessDenied:
     theError |= WriteAccessDenied ; break ;
   case ApiInvalidSize:
-    printf( "Invalid buffer size\n" );
     theError |= InvalidBufferSize ; break ;
   default: 
     break ; 
@@ -718,7 +707,7 @@ SpecsError specs_i2c_combinedread(  SPECSSLAVE * theSlave ,
   
   RETURN_CODE errorCodeFromLowLevelSpecsLib = ApiSuccess ;
 
-  if ( ! recursiveLock[ theSlave -> pSpecsmaster ] )
+  if ( ! recursiveLock[ theSlave -> pSpecsmaster -> masterID ] )
     isFromRecursiveLock = false ;
   
   theError = reserveMaster_checkRecursive( theSlave -> pSpecsmaster , 2 ) ;
@@ -745,12 +734,12 @@ SpecsError specs_i2c_combinedread(  SPECSSLAVE * theSlave ,
   }
   
   theError |= checkSlaveIt( theSlave ) ;
-  recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
   // Now do the normal READ
   theError = specs_i2c_read( theSlave , outputSelect , i2cAddress , 
                              nValues , data ) ;
 
-  if ( ! isFromRecursiveLock )   recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+  if ( ! isFromRecursiveLock )   recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
   
   theError |= releaseMaster_checkRecursive( theSlave -> pSpecsmaster ) ;
   
@@ -947,10 +936,10 @@ SpecsError specs_jtag_reset(  SPECSSLAVE * theSlave ,
   else if ( ApiWaitTimeout == specsLibError ) 
     theError |= ReadAccessDenied ;
   else if ( ApiInvalidData == specsLibError ) {
-    recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+    recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
     specs_master_softreset( theSlave -> pSpecsmaster ) ;
     theError |= ChecksumError ;
-    recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+    recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
   }
   else {
     theError |= checkSlaveIt( theSlave ) ;
@@ -989,9 +978,9 @@ SpecsError specs_jtag_idle(  SPECSSLAVE * theSlave ,
   else if ( ApiWaitTimeout == specsLibError ) 
     theError |= ReadAccessDenied ;
   else if ( ApiInvalidData == specsLibError ) {
-    recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+    recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
     specs_master_softreset( theSlave -> pSpecsmaster ) ;
-    recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+    recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
     theError |= ChecksumError ;
   }
   else {
@@ -1138,20 +1127,20 @@ SpecsError specs_slave_internal_reset(  SPECSSLAVE * theSlave ) {
   theError = reserveMaster( theSlave -> pSpecsmaster , 9 ) ;
   if ( theError != SpecsSuccess ) return theError ;
 
-  recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
   theError = 
     specs_register_write( theSlave , MezzaCtrlReg , resetOn ) ;
-  recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
 
   if ( theError != SpecsSuccess ) {
     releaseMaster( theSlave -> pSpecsmaster ) ;
     return theError ;
   }
 
-  recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
   theError = 
     specs_register_write( theSlave , MezzaCtrlReg , resetOff ) ;
-  recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
 
   theError |= releaseMaster( theSlave -> pSpecsmaster ) ;
   
@@ -1170,10 +1159,10 @@ SpecsError specs_slave_external_reset(  SPECSSLAVE * theSlave ) {
   theError = reserveMaster( theSlave -> pSpecsmaster , 10 ) ;
   if ( theError != SpecsSuccess ) return theError ;
 
-  recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
   theError = 
     specs_register_write( theSlave , MezzaCtrlReg , resetOn ) ;
-  recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
 
   if ( theError != SpecsSuccess ) {
     releaseMaster( theSlave -> pSpecsmaster ) ;
@@ -1182,10 +1171,10 @@ SpecsError specs_slave_external_reset(  SPECSSLAVE * theSlave ) {
   
   usleep( 1000 ) ;
 
-  recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
   theError =  
     specs_register_write( theSlave , MezzaCtrlReg , resetOff ) ;
-  recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
 
   theError |= releaseMaster( theSlave -> pSpecsmaster ) ;
   
@@ -1204,20 +1193,20 @@ SpecsError specs_slave_external_shortreset(  SPECSSLAVE * theSlave ) {
   theError = reserveMaster( theSlave -> pSpecsmaster , 11 ) ;
   if ( theError != SpecsSuccess ) return theError ;
 
-  recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
   theError = 
     specs_register_write( theSlave , MezzaCtrlReg , resetOn ) ;
-  recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
 
   if ( theError != SpecsSuccess ) {
     releaseMaster( theSlave -> pSpecsmaster ) ;
     return theError ;
   }
 
-  recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
   theError =  
     specs_register_write( theSlave , MezzaCtrlReg , resetOff ) ;
-  recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
 
   theError |= releaseMaster( theSlave -> pSpecsmaster ) ;
   
@@ -1267,12 +1256,12 @@ SpecsError specs_master_softreset( SPECSMASTER * theMaster ) {
 
   SpecsmasterReset( theMaster ) ;
 
-  bool wasInRecursive = recursiveLock[ theMaster ] ;
+  bool wasInRecursive = recursiveLock[ theMaster -> masterID ] ;
 
-  recursiveLock[ theMaster ] = true ;
+  recursiveLock[ theMaster -> masterID ] = true ;
   specs_master_setspeed( theMaster , initialSpeed ) ;
   if ( ! wasInRecursive ) 
-    recursiveLock[ theMaster ] = false ;
+    recursiveLock[ theMaster -> masterID ] = false ;
   
   if ( 0 != isInitialMasked ) {
     specs_master_maskchecksum( theMaster ) ;
@@ -1361,12 +1350,12 @@ SpecsError specs_master_open( DEVICE_INVENT theDevice ,
   // Verifie que le master id est compris entre 1 et 4
   if ( ( MasterId < 0 ) || ( MasterId >= NB_MASTER ) ) return WrongDeviceInfo ;
  
-  PlxHandle = EtatDev[MasterId];
+  // PlxHandle = EtatDev[MasterId];
  
   // MTQ int serId ;
   // Le driver ouvre le device Plx s'il n'a pas deja ete ouvert
-  if ( PlxHandle  == (HANDLE)-1) {
-  
+  if ( 0 == EtatDev[ MasterId ] ) {
+    
     rc = PlxPciDeviceOpen(&theDevice.StDevLoc,&PlxHandle,MasterId);
     if (rc != ApiSuccess) {
       if ( ApiNullParam == rc ) return InvalidParameter ;
@@ -1375,16 +1364,17 @@ SpecsError specs_master_open( DEVICE_INVENT theDevice ,
       else if ( ApiInvalidDriverVersion == rc ) return NoPlxDriver ;
     }
 
-    EtatDev[MasterId] = PlxHandle;
-    EtatDevCount[MasterId] += 1;
-
     SpecsmasterInit(theMasterCard,MasterId,PlxHandle) ;   
+
+    EtatDev[MasterId] = theMasterCard ;
+    EtatDevCount[MasterId] += 1;
 
     // MTQ il n'y a pas de serial number serId = (int) board_serialNumber( &PlxHandle ) ;
   } else {
     EtatDevCount[MasterId] += 1;
+    PlxHandle = ( EtatDev[ MasterId ] ) -> hdle ;
     SpecsmasterInit(theMasterCard,MasterId,PlxHandle) ;
-
+    
     // MTQ il n'y a pas de serial number  serId = (int) board_serialNumber( &PlxHandle ) ;
   }
 
@@ -1393,40 +1383,26 @@ SpecsError specs_master_open( DEVICE_INVENT theDevice ,
   // Add interrupt event maps
   PLX_NOTIFY_OBJECT Event ;
 
-
-  // Store Serial ID
-  outputStream.str( "" ) ;
-  outputStream << "/dev/plx/" << theDevice.StDevLoc.SerialNumber ;
-  serialIdMap[ theMasterCard ] = outputStream.str() ;
-
   rc = PlxNotificationRegisterFor( theMasterCard -> hdle , 
                                    &IntSources ,MasterId);
   //MTQ                                  &IntSources , &Event ) ;
  
   if ( rc != ApiSuccess ) return WrongDeviceInfo ;
   std::pair< intEventMapIterator , bool > resEv = 
-    intEventMap.insert( std::make_pair( theMasterCard , Event ) ) ;
+    intEventMap.insert( std::make_pair( theMasterCard -> masterID , Event ) ) ;
   if ( ! resEv.second ) return WrongDeviceInfo ;
-  
-  // Fill Map with IDs
-  std::pair< idMapIterator , bool > resId = 
-    idMap.insert( std::make_pair( theMasterCard , 
-                                  (unsigned short) MasterId ) ) ;
-  if ( ! resId.second ) return WrongDeviceInfo ;
-
 
   bool semExists = true ;
   int semId = 0 ;
   outputStream.str( "" ) ;
-  outputStream << "/dev/plx/" << theDevice.StDevLoc.SerialNumber ;
+  outputStream << "/dev/AltSpecsV2Master" << theMasterCard -> masterID ;
 
   if ( ! specsCreateSemaphore( &semExists , &semId , outputStream.str() , 
-                               MasterId , 3 , &mutexMap , theMasterCard ) ) 
-
+                               MasterId , 3 , &mutexMap , theMasterCard ) )
     return WrongDeviceInfo ;
 
   // initialize recursive lock variable
-  recursiveLock[ theMasterCard ] = false ;  
+  recursiveLock[ theMasterCard -> masterID ] = false ;  
 
   // raz of semaphore if needed
   int semValue = semctl( semId , 0 , GETVAL ) ;
@@ -1505,22 +1481,20 @@ SpecsError specs_master_close( SPECSMASTER * theMasterCard )
   operation.sem_num = 2 ;
   operation.sem_op  = -1 ;
   operation.sem_flg = SEM_UNDO ;
-  semtimedop( mutexMap[ theMasterCard ] , &operation , 1 , &LockDelay ) ;   
+  semtimedop( mutexMap[ theMasterCard -> masterID ] , &operation , 1 , &LockDelay ) ;   
   // Get value 
-  int nOpenedMaster = semctl( mutexMap[ theMasterCard ] , 2 , GETVAL ) ;
+  int nOpenedMaster = semctl( mutexMap[ theMasterCard -> masterID ] , 2 , GETVAL ) ;
   if ( 0 == nOpenedMaster ) 
-    semctl( mutexMap[ theMasterCard ] , 0 , IPC_RMID ) ;
+    semctl( mutexMap[ theMasterCard -> masterID ] , 0 , IPC_RMID ) ;
   
-  recursiveLock[ theMasterCard ] = false ;
+  recursiveLock[ theMasterCard -> masterID ] = false ;
  
-  if (EtatDev[ theMasterCard->masterID] != PlxHdle) return InvalidParameter;
-  if ( EtatDev[ theMasterCard->masterID] == -1) return InvalidParameter;
+  if ( EtatDev[ theMasterCard -> masterID ] != theMasterCard ) 
+    return InvalidParameter;
+  if ( EtatDev[ theMasterCard -> masterID ] == 0 ) return InvalidParameter;
 
-  mutexMap.erase( theMasterCard ) ;
-  intEventMap.erase( theMasterCard ) ;
-  
-  serialIdMap.erase( theMasterCard ) ;
-  idMap.erase( theMasterCard ) ;
+  mutexMap.erase( theMasterCard -> masterID ) ;
+  intEventMap.erase( theMasterCard -> masterID ) ;
 
   // MTQ il n'y a pas de serial number int serId = specs_master_serialNumber( theMasterCard ) ;
   
@@ -1530,8 +1504,8 @@ SpecsError specs_master_close( SPECSMASTER * theMasterCard )
 
   //MTQ PlxNotificationCancel(PlxHdle,&intEventMap[theMasterCard]); a revoir s'il faut faire un close l'un apres l'autre
   PlxNotificationCancel(PlxHdle,0);
-  memset(&intEventMap[theMasterCard],0,sizeof(PLX_NOTIFY_OBJECT));
-  intEventMap.erase( theMasterCard ) ;
+  memset(&intEventMap[theMasterCard->masterID],0,sizeof(PLX_NOTIFY_OBJECT));
+  intEventMap.erase( theMasterCard -> masterID ) ;
 
   // Ferme le Plx Device. S'il y a encore des masters ouverts
   // a ce moment-la, ca ne fait rien.
@@ -1540,7 +1514,7 @@ SpecsError specs_master_close( SPECSMASTER * theMasterCard )
   rc = PlxPciDeviceClose(PlxHdle, theMasterCard->masterID);
   if ( rc == ApiSuccess)
   {  printf("close %d in master_close_\n", theMasterCard->masterID);
-    EtatDev[ theMasterCard->masterID] = -1;
+    EtatDev[ theMasterCard->masterID] = 0 ;
   }
   if (rc != ApiSuccess)
     return InvalidParameter;
@@ -1588,20 +1562,20 @@ SpecsError specs_dcu_register_write(  SPECSSLAVE * theSlave ,
   U8 initialSpeed , isInitialMasked ;
   SpecsError theError = SpecsSuccess ;
 
-  if ( ! recursiveLock[ theSlave -> pSpecsmaster ] ) fromRecursiveLock = false ;
+  if ( ! recursiveLock[ theSlave -> pSpecsmaster -> masterID ] ) fromRecursiveLock = false ;
   theError = reserveMaster_checkRecursive( theSlave -> pSpecsmaster , 6 ) ;
   if ( theError != SpecsSuccess ) return theError ;
   
   initialSpeed = getSpeed( theSlave -> pSpecsmaster ) ;
   isInitialMasked = isChecksumMasked( theSlave -> pSpecsmaster ) ;
   if ( initialSpeed != DCUSpeed ) {
-    recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+    recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
     theError = specs_master_setspeed( theSlave -> pSpecsmaster , DCUSpeed ) ;
-    if ( ! fromRecursiveLock )   recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+    if ( ! fromRecursiveLock )   recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
     if ( 0 != isInitialMasked ) {
-      recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
       theError |= specs_master_maskchecksum( theSlave -> pSpecsmaster ) ;
-      if ( ! fromRecursiveLock)   recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+      if ( ! fromRecursiveLock)   recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
     }
     
     if ( theError != SpecsSuccess ) {
@@ -1609,19 +1583,19 @@ SpecsError specs_dcu_register_write(  SPECSSLAVE * theSlave ,
       return theError ;
     }
   }
-  recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
   theError = specs_i2c_write( theSlave , DcuOutputSelect , address , 1 , 
                               &data ) ;
-  if ( ! fromRecursiveLock ) recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+  if ( ! fromRecursiveLock ) recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
   if ( initialSpeed != DCUSpeed ) {
-    recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+    recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
     specs_master_setspeed( theSlave -> pSpecsmaster , initialSpeed ) ;
-    if ( ! fromRecursiveLock )   recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+    if ( ! fromRecursiveLock )   recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
     
     if ( 0 != isInitialMasked ) {
-      recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
       specs_master_maskchecksum( theSlave -> pSpecsmaster ) ;
-      if ( ! fromRecursiveLock ) recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+      if ( ! fromRecursiveLock ) recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
     }
   }
 
@@ -1646,20 +1620,21 @@ SpecsError specs_dcu_register_read(  SPECSSLAVE * theSlave ,
   theError = reserveMaster_checkRecursive( theSlave -> pSpecsmaster , 7 ) ;
   if ( theError != SpecsSuccess ) return theError ;
 
-  if ( !   recursiveLock[ theSlave -> pSpecsmaster ] )
+  if ( !   recursiveLock[ theSlave -> pSpecsmaster -> masterID ] )
     isFromRecursiveLock = false ;
   
   initialSpeed = getSpeed( theSlave -> pSpecsmaster ) ;
   isInitialMasked = isChecksumMasked( theSlave -> pSpecsmaster ) ;
   if ( initialSpeed != DCUSpeed ) {
-    recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+    recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
     theError = specs_master_setspeed( theSlave -> pSpecsmaster , DCUSpeed ) ;
-    if ( ! isFromRecursiveLock )   recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+    if ( ! isFromRecursiveLock ) recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = 
+                                   false ;
     
     if ( 0 != isInitialMasked ) {
-      recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
       theError |= specs_master_maskchecksum( theSlave -> pSpecsmaster ) ;
-      if ( ! isFromRecursiveLock ) recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+      if ( ! isFromRecursiveLock ) recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
     }
     if ( theError != SpecsSuccess ) {
       releaseMaster_checkRecursive( theSlave -> pSpecsmaster ) ;
@@ -1667,20 +1642,20 @@ SpecsError specs_dcu_register_read(  SPECSSLAVE * theSlave ,
     }
   }
 
-  recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
   theError = specs_i2c_read( theSlave , DcuOutputSelect , address , 1 , 
                              data ) ;
-  if ( ! isFromRecursiveLock ) recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+  if ( ! isFromRecursiveLock ) recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
 
   if ( initialSpeed != DCUSpeed ) {
-    recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+    recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
     specs_master_setspeed( theSlave -> pSpecsmaster , initialSpeed ) ;
-    if( ! isFromRecursiveLock ) recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+    if( ! isFromRecursiveLock ) recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
 
     if ( 0 != isInitialMasked ) {
-      recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
       specs_master_maskchecksum( theSlave -> pSpecsmaster ) ;
-      if ( ! isFromRecursiveLock ) recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+      if ( ! isFromRecursiveLock ) recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
     }
   }
   theError |= releaseMaster_checkRecursive( theSlave -> pSpecsmaster ) ;
@@ -1710,15 +1685,15 @@ SpecsError specs_dcu_acquire(  SPECSSLAVE * theSlave  ,
   initialSpeed = getSpeed( theSlave -> pSpecsmaster ) ;
   isInitialMasked = isChecksumMasked( theSlave -> pSpecsmaster ) ;
   if ( initialSpeed != DCUSpeed ) {
-    recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+    recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
     readError = specs_master_setspeed( theSlave -> pSpecsmaster , 
                                        DCUSpeed ) ;
-    recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+    recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
     
     if ( 0 != isInitialMasked ) {
-      recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
       readError |= specs_master_maskchecksum( theSlave -> pSpecsmaster ) ;
-      recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
     }
     
     if ( readError != SpecsSuccess ) {
@@ -1727,20 +1702,20 @@ SpecsError specs_dcu_acquire(  SPECSSLAVE * theSlave  ,
     }
   }
 
-  recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
   readError = specs_dcu_register_read( theSlave , DcuCREG , &retValue ) ;
-  recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
 
   if ( SpecsSuccess != readError ) {
     if ( initialSpeed != DCUSpeed ) {
-      recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
       specs_master_setspeed( theSlave -> pSpecsmaster , initialSpeed ) ;
-      recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
 
       if ( 0 != isInitialMasked ) {
-        recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+        recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
         specs_master_maskchecksum( theSlave -> pSpecsmaster ) ;
-        recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+        recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
       }
     }
     releaseMaster( theSlave -> pSpecsmaster ) ;
@@ -1748,28 +1723,28 @@ SpecsError specs_dcu_acquire(  SPECSSLAVE * theSlave  ,
   }
   
   retValue = ( retValue & 0xC8 ) | ( inputChannel & 0x07 ) ;
-  recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
   readError = specs_dcu_register_write( theSlave , DcuCREG , retValue ) ;
-  recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
 
-  recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
   readError |= specs_dcu_register_write( theSlave , DcuTREG , 0x10 ) ;
-  recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
 
-  recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
   readError |= specs_dcu_register_write( theSlave , DcuAREG , 0x00 ) ;
-  recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
 
   if ( SpecsSuccess != readError ) {
     if ( initialSpeed != DCUSpeed ) {
-      recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
       specs_master_setspeed( theSlave -> pSpecsmaster , initialSpeed ) ;
-      recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
 
       if ( 0 != isInitialMasked ) {
-        recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+        recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
         specs_master_maskchecksum( theSlave -> pSpecsmaster ) ;
-        recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+        recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
       }
     }
     releaseMaster( theSlave -> pSpecsmaster ) ;
@@ -1777,41 +1752,41 @@ SpecsError specs_dcu_acquire(  SPECSSLAVE * theSlave  ,
   }    
   
   // start acquisition ( write 0x80 in CREG)
-  recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
   readError = specs_dcu_register_read( theSlave , DcuCREG , &retValue ) ;
-  recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
   
   if ( SpecsSuccess != readError ) {
     if ( initialSpeed != DCUSpeed ) {
-      recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
       specs_master_setspeed( theSlave -> pSpecsmaster , initialSpeed ) ;
-      recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
 
       if ( 0 != isInitialMasked ) {
-        recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+        recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
         specs_master_maskchecksum( theSlave -> pSpecsmaster ) ;
-        recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+        recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
       }
     }
     releaseMaster( theSlave -> pSpecsmaster ) ;
     return readError ;
   }    
 
-  recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
   readError = specs_dcu_register_write( theSlave , DcuCREG , 
                                         ( retValue & 0xF) | 0x80 ) ;
-  recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
 
   if ( SpecsSuccess != readError ) {
     if ( initialSpeed != DCUSpeed ) {
-      recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
       specs_master_setspeed( theSlave -> pSpecsmaster , initialSpeed ) ;
-      recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
 
       if ( 0 != isInitialMasked ) {
-        recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+        recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
         specs_master_maskchecksum( theSlave -> pSpecsmaster ) ;
-        recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+        recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
       }
     }
     releaseMaster( theSlave -> pSpecsmaster ) ;
@@ -1822,20 +1797,20 @@ SpecsError specs_dcu_acquire(  SPECSSLAVE * theSlave  ,
   nIter = 0 ;
   getResult = false ;
   while ( ! getResult ) {
-    recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+    recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
     readError = specs_dcu_register_read( theSlave , DcuSHREG , &retValue ) ;
-    recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+    recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
 
     if ( SpecsSuccess != readError ) {
       if ( initialSpeed != DCUSpeed ) {
-        recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+        recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
         specs_master_setspeed( theSlave -> pSpecsmaster , initialSpeed ) ;
-        recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+        recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
 	
         if ( 0 != isInitialMasked ) {
-          recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+          recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
           specs_master_maskchecksum( theSlave -> pSpecsmaster ) ;
-          recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+          recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
         }
       }
       releaseMaster( theSlave -> pSpecsmaster ) ;
@@ -1845,14 +1820,14 @@ SpecsError specs_dcu_acquire(  SPECSSLAVE * theSlave  ,
     nIter++ ;
     if ( nIter == 1000 ) {
       if ( initialSpeed != DCUSpeed ) {
-        recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+        recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
         specs_master_setspeed( theSlave -> pSpecsmaster , initialSpeed ) ;
-        recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+        recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
 	
         if ( 0 != isInitialMasked ) {
-          recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+          recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
           specs_master_maskchecksum( theSlave -> pSpecsmaster ) ;
-          recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+          recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
         }
       }
       releaseMaster( theSlave -> pSpecsmaster ) ;
@@ -1864,20 +1839,20 @@ SpecsError specs_dcu_acquire(  SPECSSLAVE * theSlave  ,
   
   // Read lower bits in LREG
   U8 lvalue ;
-  recursiveLock[ theSlave -> pSpecsmaster ] = true ;  
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;  
   readError = specs_dcu_register_read( theSlave , DcuLREG , &lvalue ) ;
-  recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
 
   if ( SpecsSuccess != readError ) {
     if ( initialSpeed != DCUSpeed ) {
-      recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
       specs_master_setspeed( theSlave -> pSpecsmaster , initialSpeed ) ;
-      recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
        
       if ( 0 != isInitialMasked ) {
-        recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+        recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
         specs_master_maskchecksum( theSlave -> pSpecsmaster ) ;
-        recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+        recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
       }
     }
     releaseMaster( theSlave -> pSpecsmaster ) ;
@@ -1887,19 +1862,19 @@ SpecsError specs_dcu_acquire(  SPECSSLAVE * theSlave  ,
   *data = ( ( retValue & 0x0F ) << 8 ) | ( lvalue & 0xFF ) ;
   
   mode = 0 ;
-  recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
   readError = specs_dcu_read_mode( theSlave , &mode ) ;
-  recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
   
   if ( SpecsSuccess != readError ) {
     if ( initialSpeed != DCUSpeed ) {
-      recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
       specs_master_setspeed( theSlave -> pSpecsmaster , initialSpeed ) ;
-      recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
       if ( 0 != isInitialMasked ) {
-        recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+        recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
         specs_master_maskchecksum( theSlave -> pSpecsmaster ) ;
-        recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+        recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
       }
     }
     releaseMaster( theSlave -> pSpecsmaster ) ;
@@ -1909,20 +1884,20 @@ SpecsError specs_dcu_acquire(  SPECSSLAVE * theSlave  ,
   // Find conversion values
   if ( inputChannel < 6 ) {
     double a , b ;
-    recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+    recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
     specs_slave_dcuconstant( theSlave , inputChannel , mode , &a , &b ) ;
-    recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+    recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
     *convertedValue = (*data) * a + b ;
   } else *convertedValue = 0. ;    
   
   if ( initialSpeed != DCUSpeed ) {
-    recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+    recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
     specs_master_setspeed( theSlave -> pSpecsmaster , initialSpeed ) ;
-    recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+    recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
     if ( 0 != isInitialMasked ) {
-      recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
       specs_master_maskchecksum( theSlave -> pSpecsmaster ) ;
-      recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
     }
   }
   
@@ -1946,15 +1921,15 @@ SpecsError specs_dcu_reset(  SPECSSLAVE * theSlave ) {
   initialSpeed = getSpeed( theSlave -> pSpecsmaster ) ;
   isInitialMasked = isChecksumMasked( theSlave -> pSpecsmaster ) ;
   if ( initialSpeed != DCUSpeed ) {
-    recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+    recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
     readError = specs_master_setspeed( theSlave -> pSpecsmaster , 
                                        DCUSpeed ) ;
-    recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+    recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
 
     if ( 0 != isInitialMasked ) {
-      recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
       readError |= specs_master_maskchecksum( theSlave -> pSpecsmaster ) ;
-      recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
     }
     
     if ( readError != SpecsSuccess ) {
@@ -1963,40 +1938,40 @@ SpecsError specs_dcu_reset(  SPECSSLAVE * theSlave ) {
     }
   }
 
-  recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
   readError = specs_dcu_register_read( theSlave , DcuCREG , 
                                        &retValue ) ;
-  recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
 
   if ( SpecsSuccess != readError ) {
     if ( initialSpeed != DCUSpeed ) {
-      recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
       specs_master_setspeed( theSlave -> pSpecsmaster , 
                              initialSpeed ) ;
-      recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
       if ( 0 != isInitialMasked ) {
-        recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+        recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
         specs_master_maskchecksum( theSlave -> pSpecsmaster ) ;
-        recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+        recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
       }
     }
     releaseMaster( theSlave -> pSpecsmaster ) ;
     return readError ;
   }
 
-  recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
   readError |= specs_dcu_register_write( theSlave , DcuCREG , 
                                          retValue | 0x40 ) ;
-  recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
   
   if ( initialSpeed != DCUSpeed ) {
-    recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+    recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
     specs_master_setspeed( theSlave -> pSpecsmaster , initialSpeed ) ;
-    recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+    recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
     if ( 0 != isInitialMasked ) {
-      recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
       specs_master_maskchecksum( theSlave -> pSpecsmaster ) ;
-      recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
     }
   }
 
@@ -2021,15 +1996,15 @@ SpecsError specs_dcu_initialize(  SPECSSLAVE * theSlave ) {
   isInitialMasked = isChecksumMasked( theSlave -> pSpecsmaster ) ;
   
   if ( initialSpeed != DCUSpeed ) {
-    recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+    recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
     readError = specs_master_setspeed( theSlave -> pSpecsmaster , 
                                        DCUSpeed ) ;
-    recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+    recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
 
     if ( 0 != isInitialMasked ) {
-      recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
       readError |= specs_master_maskchecksum( theSlave -> pSpecsmaster ) ;
-      recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
     }
     
     if ( readError != SpecsSuccess ) {
@@ -2038,35 +2013,35 @@ SpecsError specs_dcu_initialize(  SPECSSLAVE * theSlave ) {
     }
   }
 
-  recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
   readError = specs_dcu_register_read( theSlave , DcuCREG , &retValue ) ;
-  recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
   
   if ( SpecsSuccess != readError ) {
     if ( DCUSpeed != initialSpeed ) {
-      recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
       specs_master_setspeed( theSlave -> pSpecsmaster , DCUSpeed ) ;
-      recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
     }
     releaseMaster( theSlave -> pSpecsmaster ) ;
     return readError ;
   }
 
-  recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
   readError = specs_dcu_register_write( theSlave , DcuCREG , 
                                         retValue & 0xCF ) ;
-  recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
   
   if ( SpecsSuccess != readError ) {
     if ( DCUSpeed != initialSpeed ) {
-      recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
       specs_master_setspeed( theSlave -> pSpecsmaster , DCUSpeed ) ;
-      recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
 
       if ( 0 != isInitialMasked ) {
-        recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+        recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
         specs_master_maskchecksum( theSlave -> pSpecsmaster ) ;
-        recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+        recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
       }
     }
     releaseMaster( theSlave -> pSpecsmaster ) ;
@@ -2074,18 +2049,18 @@ SpecsError specs_dcu_initialize(  SPECSSLAVE * theSlave ) {
   }
     
   // TREG is written with 0x10
-  recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
   readError = specs_dcu_register_write( theSlave , DcuTREG , 0x10 ) ;
-  recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
   if ( SpecsSuccess != readError ) {
     if ( DCUSpeed != initialSpeed ) {
-      recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
       specs_master_setspeed( theSlave -> pSpecsmaster , DCUSpeed ) ;
-      recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
       if ( 0 != isInitialMasked ) {
-        recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+        recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
         specs_master_maskchecksum( theSlave -> pSpecsmaster ) ;
-        recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+        recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
       }
     }
     releaseMaster( theSlave -> pSpecsmaster ) ;
@@ -2093,18 +2068,18 @@ SpecsError specs_dcu_initialize(  SPECSSLAVE * theSlave ) {
   }
 
   // AREG is written with 0x00
-  recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
   readError = specs_dcu_register_write( theSlave , DcuAREG , 0x00 ) ;
-  recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
   
   if ( DCUSpeed != initialSpeed ) {
-    recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+    recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
     specs_master_setspeed( theSlave -> pSpecsmaster , DCUSpeed ) ;
-    recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+    recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
     if ( 0 != isInitialMasked ) {
-      recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
       specs_master_maskchecksum( theSlave -> pSpecsmaster ) ;
-      recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
     }
   }
   releaseMaster( theSlave -> pSpecsmaster ) ;
@@ -2127,15 +2102,15 @@ SpecsError specs_dcu_set_LIR(  SPECSSLAVE * theSlave ) {
   initialSpeed = getSpeed( theSlave -> pSpecsmaster ) ;
   isInitialMasked = isChecksumMasked( theSlave -> pSpecsmaster ) ;
   if ( initialSpeed != DCUSpeed ) {
-    recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+    recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
     readError = specs_master_setspeed( theSlave -> pSpecsmaster , 
                                        DCUSpeed ) ;
-    recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+    recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
     
     if ( 0 != isInitialMasked ) {
-      recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
       readError |= specs_master_maskchecksum( theSlave -> pSpecsmaster ) ;
-      recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
     }
     
     if ( readError != SpecsSuccess ) {
@@ -2144,19 +2119,19 @@ SpecsError specs_dcu_set_LIR(  SPECSSLAVE * theSlave ) {
     }
   }
 
-  recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
   readError = specs_dcu_register_read( theSlave , DcuCREG , &retValue ) ;
-  recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
   
   if ( SpecsSuccess != readError ) {
     if ( initialSpeed != DCUSpeed ) {
-      recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
       specs_master_setspeed( theSlave -> pSpecsmaster , initialSpeed ) ;
-      recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
       if ( 0 != isInitialMasked ) {
-        recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+        recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
         specs_master_maskchecksum( theSlave -> pSpecsmaster ) ;
-        recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+        recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
       }
     }
  
@@ -2165,20 +2140,20 @@ SpecsError specs_dcu_set_LIR(  SPECSSLAVE * theSlave ) {
   }
     
   // write '1' in bit 3 of CREG
-  recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
   readError = specs_dcu_register_write( theSlave , DcuCREG , 
                                         retValue | 0x08 ) ;
-  recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
 
   if ( initialSpeed != DCUSpeed ) {
-    recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+    recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
     specs_master_setspeed( theSlave -> pSpecsmaster , initialSpeed ) ;
-    recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+    recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
 
     if ( 0 != isInitialMasked ) {
-      recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
       specs_master_maskchecksum( theSlave -> pSpecsmaster ) ;
-      recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
     }
   }
 
@@ -2202,15 +2177,15 @@ SpecsError specs_dcu_set_HIR(  SPECSSLAVE * theSlave ) {
   initialSpeed = getSpeed( theSlave -> pSpecsmaster ) ;
   isInitialMasked = isChecksumMasked( theSlave -> pSpecsmaster ) ;
   if ( initialSpeed != DCUSpeed ) {
-    recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+    recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
     readError = specs_master_setspeed( theSlave -> pSpecsmaster , 
                                        DCUSpeed ) ;
-    recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+    recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
     
     if ( 0 != isInitialMasked ) {
-      recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
       readError |= specs_master_maskchecksum( theSlave -> pSpecsmaster ) ;
-      recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
     }
    
     if ( readError != SpecsSuccess ) {
@@ -2219,19 +2194,19 @@ SpecsError specs_dcu_set_HIR(  SPECSSLAVE * theSlave ) {
     }
   }
 
-  recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
   readError = specs_dcu_register_read( theSlave , DcuCREG , &retValue ) ;
-  recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
 
   if ( SpecsSuccess != readError ) {
     if ( initialSpeed != DCUSpeed ) {
-      recursiveLock[ theSlave -> pSpecsmaster ] = true ;	
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;	
       specs_master_setspeed( theSlave -> pSpecsmaster , initialSpeed ) ;
-      recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
       if ( 0 != isInitialMasked ) {
-        recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+        recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
         specs_master_maskchecksum( theSlave -> pSpecsmaster ) ;
-        recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+        recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
       }
     }
     releaseMaster( theSlave -> pSpecsmaster ) ;
@@ -2239,19 +2214,19 @@ SpecsError specs_dcu_set_HIR(  SPECSSLAVE * theSlave ) {
   }
     
   // write '0' in bit 3 of CREG
-  recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
   readError = specs_dcu_register_write( theSlave , DcuCREG , 
                                         retValue & 0xF7 ) ;
-  recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
 
   if ( initialSpeed != DCUSpeed ) {
-    recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+    recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
     specs_master_setspeed( theSlave -> pSpecsmaster , initialSpeed ) ;
-    recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+    recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
     if ( 0 != isInitialMasked ) {
-      recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
       specs_master_maskchecksum( theSlave -> pSpecsmaster ) ;
-      recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
     }
   }
 
@@ -2533,7 +2508,6 @@ SpecsError specs_master_setspeed( SPECSMASTER * theMaster , U8 speed ) {
   if ( 0 == theMaster ) return InvalidParameter ;
   int kk ;
   unsigned int j = 0 ;
-  idMapIterator idIt ;
   U32 n ;
 
   SpecsError theError = reserveMaster_checkRecursive( theMaster , 8 ) ; 
@@ -2571,7 +2545,6 @@ SpecsError specs_master_maskchecksum( SPECSMASTER * theMaster ) {
   int kk ;
 
   unsigned int j = 0 ;
-  idMapIterator idIt ;
   U32 n ;
   U8 speed ;
   SpecsError theError = reserveMaster_checkRecursive( theMaster , 9 ) ;
@@ -2614,7 +2587,6 @@ SpecsError specs_master_unmaskchecksum( SPECSMASTER * theMaster ) {
   int kk ;
 
   unsigned int j = 0 ;
-  idMapIterator idIt ;
   U32 n ;
   U8 speed ;
   
@@ -2679,13 +2651,13 @@ SpecsError specs_slave_write_eeprom( SPECSSLAVE * theSlave , U8 pageNumber ,
   initialSpeed = getSpeed( theSlave -> pSpecsmaster ) ;
   isInitialMasked = isChecksumMasked( theSlave -> pSpecsmaster ) ;
   if ( 3 != initialSpeed ) {
-    recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+    recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
     theError = specs_master_setspeed( theSlave -> pSpecsmaster , 3 ) ;
-    recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+    recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
     if ( 0 != isInitialMasked ) {
-      recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
       theError |= specs_master_maskchecksum( theSlave -> pSpecsmaster ) ;
-      recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
     }
     
     if ( theError != SpecsSuccess ) {
@@ -2695,31 +2667,31 @@ SpecsError specs_slave_write_eeprom( SPECSSLAVE * theSlave , U8 pageNumber ,
   }
     
   // Recursive call
-  recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
   theError = specs_register_read( theSlave , MezzaCtrlReg , 
                                   &value ) ;
-  recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
   
   if ( theError != SpecsSuccess ) {
     if ( 3 != initialSpeed ) {
-      recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
       specs_master_setspeed( theSlave -> pSpecsmaster , 
                              initialSpeed ) ;
-      recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
       if ( 0 != isInitialMasked ) {
-        recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+        recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
         specs_master_maskchecksum( theSlave -> pSpecsmaster ) ;
-        recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+        recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
       }
     }
     releaseMaster( theSlave -> pSpecsmaster ) ;
     return theError ;
   }
 
-  recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
   theError = specs_register_write( theSlave , MezzaCtrlReg , 
                                    ( value & 0x9F ) | 0x40 ) ;
-  recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
   
   if ( theError != SpecsSuccess ) {
     if ( 3 != initialSpeed ) {
@@ -2733,29 +2705,29 @@ SpecsError specs_slave_write_eeprom( SPECSSLAVE * theSlave , U8 pageNumber ,
     return theError ;
   }
 
-  recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
   theError = specs_i2c_write( theSlave , EEPROMOutputSelect , 
                               EEPROMAddress , nValues + 2 , newData ) ;
-  recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
 
   if ( theError != SpecsSuccess ) {
     if ( 3 != initialSpeed ) {
-      recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
       specs_master_setspeed( theSlave -> pSpecsmaster , 
                              initialSpeed ) ;
-      recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
       
       if ( 0 != isInitialMasked ) {
-        recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+        recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
         specs_master_maskchecksum( theSlave -> pSpecsmaster ) ;
-        recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+        recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
       }
     }
 
-    recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+    recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
     specs_register_write( theSlave , MezzaCtrlReg , 
                           ( value & 0x9F ) | 0x20 ) ;
-    recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+    recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
     
     releaseMaster( theSlave -> pSpecsmaster ) ;
     return theError ;
@@ -2763,20 +2735,20 @@ SpecsError specs_slave_write_eeprom( SPECSSLAVE * theSlave , U8 pageNumber ,
     
   usleep( 30000 ) ;
 
-  recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
   theError = specs_register_write( theSlave , MezzaCtrlReg , 
                                    ( value & 0x9F ) | 0x20 ) ;
-  recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
 
   if ( 3 != initialSpeed ) {
-    recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+    recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
     specs_master_setspeed( theSlave -> pSpecsmaster , 
                            initialSpeed ) ;
-    recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+    recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
     if ( 0 != isInitialMasked ) {
-      recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
       specs_master_maskchecksum( theSlave -> pSpecsmaster ) ;
-      recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
     }
   }
   releaseMaster( theSlave -> pSpecsmaster ) ;
@@ -2804,7 +2776,7 @@ SpecsError specs_slave_read_eeprom( SPECSSLAVE * theSlave ,
   newData[ 1 ] = static_cast< U8 >( MemAdd & 0xFF ) ;
   newData[ 0 ] = static_cast< U8 >( ( MemAdd & 0xFF00 ) >> 8 ) ;
 
-  if ( !   recursiveLock[ theSlave -> pSpecsmaster ] )
+  if ( !   recursiveLock[ theSlave -> pSpecsmaster -> masterID ] )
     isFromRecursiveLock = false ;
   
   theError = reserveMaster_checkRecursive( theSlave -> pSpecsmaster , 11 ) ;
@@ -2814,34 +2786,34 @@ SpecsError specs_slave_read_eeprom( SPECSSLAVE * theSlave ,
   isInitialMasked = isChecksumMasked( theSlave -> pSpecsmaster ) ;
  
   if ( 3 != initialSpeed ) {
-    recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+    recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
     theError = specs_master_setspeed( theSlave -> pSpecsmaster , 3 ) ;
-    if ( ! isFromRecursiveLock )  recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+    if ( ! isFromRecursiveLock )  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
     if ( 0 != isChecksumMasked ) {  // MTQ  appel de fonction ou c'est isInitialMasked ???
-      recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
       theError |= specs_master_maskchecksum( theSlave -> pSpecsmaster ) ;
-      if ( ! isFromRecursiveLock ) recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+      if ( ! isFromRecursiveLock ) recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
     }
     if ( theError != SpecsSuccess ) {
       releaseMaster_checkRecursive( theSlave -> pSpecsmaster ) ;
       return theError ;
     }   
   }
-  recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
   theError = specs_register_read( theSlave , MezzaCtrlReg , &value ) ;
-  if( ! isFromRecursiveLock )   recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+  if( ! isFromRecursiveLock )   recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
   if ( theError != SpecsSuccess ) {
     if ( 3 != initialSpeed ) {
-      recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
       specs_master_setspeed( theSlave -> pSpecsmaster , initialSpeed ) ;
-      if ( ! isFromRecursiveLock ) recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+      if ( ! isFromRecursiveLock ) recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
 
       if ( ! isFromRecursiveLock ) 
 
         if ( 0 != isChecksumMasked ) {
-          recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+          recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
           specs_master_maskchecksum( theSlave -> pSpecsmaster ) ;
-          if ( ! isFromRecursiveLock )   recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+          if ( ! isFromRecursiveLock )   recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
         }
     }
 
@@ -2849,65 +2821,65 @@ SpecsError specs_slave_read_eeprom( SPECSSLAVE * theSlave ,
     return theError ;
   }
     
-  recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
   theError = specs_register_write( theSlave , MezzaCtrlReg , 
                                    ( value & 0x79F ) | 0x40 ) ;
-  if( ! isFromRecursiveLock ) recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+  if( ! isFromRecursiveLock ) recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
 
   if ( theError != SpecsSuccess ) {
     if ( 3 != initialSpeed ) {
-      recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
       specs_master_setspeed( theSlave -> pSpecsmaster , initialSpeed ) ;
-      if ( ! isFromRecursiveLock )   recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+      if ( ! isFromRecursiveLock )   recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
 
       if ( 0 != isChecksumMasked ) {
-        recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+        recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
         specs_master_maskchecksum( theSlave -> pSpecsmaster ) ;
-        if ( ! isFromRecursiveLock )   recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+        if ( ! isFromRecursiveLock )   recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
       }
     }
     releaseMaster_checkRecursive( theSlave -> pSpecsmaster ) ;
     return theError ;
   } 
-  recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
   theError = specs_i2c_combinedread( theSlave , EEPROMOutputSelect , 
                                      EEPROMAddress , newData , 2 , 
                                      nValues , data ) ;
-  if ( ! isFromRecursiveLock )   recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+  if ( ! isFromRecursiveLock ) recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
   
   if ( theError != SpecsSuccess ) {
     if ( 3 != initialSpeed ) {
-      recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
       specs_master_setspeed( theSlave -> pSpecsmaster , initialSpeed ) ;
-      if ( ! isFromRecursiveLock )  recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+      if ( ! isFromRecursiveLock )  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
  
       if ( 0 != isChecksumMasked ) {
-        recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+        recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
         specs_master_maskchecksum( theSlave -> pSpecsmaster ) ;
-        if ( ! isFromRecursiveLock ) recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+        if ( ! isFromRecursiveLock ) recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
       }
     }
-    recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+    recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
     specs_register_write( theSlave , MezzaCtrlReg , 
                           ( value & 0x9F ) | 0x20 ) ;
-    if( ! isFromRecursiveLock ) recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+    if( ! isFromRecursiveLock ) recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
     releaseMaster_checkRecursive( theSlave -> pSpecsmaster ) ;
     return theError ;
   }
 
-  recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+  recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
   theError = specs_register_write( theSlave , MezzaCtrlReg , 
                                    ( value & 0x9F ) | 0x20 ) ;
-  if( ! isFromRecursiveLock ) recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+  if( ! isFromRecursiveLock ) recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
   if ( 3 != initialSpeed ) {
-    recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+    recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
     specs_master_setspeed( theSlave -> pSpecsmaster , initialSpeed ) ;
-    if ( ! isFromRecursiveLock ) recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+    if ( ! isFromRecursiveLock ) recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
     
     if ( 0 != isChecksumMasked ) {
-      recursiveLock[ theSlave -> pSpecsmaster ] = true ;
+      recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
       specs_master_maskchecksum( theSlave -> pSpecsmaster ) ;
-      if (! isFromRecursiveLock ) recursiveLock[ theSlave -> pSpecsmaster ] = false ;
+      if (! isFromRecursiveLock ) recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
     } 
   }
   theError |= releaseMaster_checkRecursive( theSlave -> pSpecsmaster ) ;
@@ -2969,8 +2941,7 @@ U8 getSpeed( SPECSMASTER * theMaster ) {
 U8 isChecksumMasked( SPECSMASTER * theMaster ) {
   RETURN_CODE rc ;
   U32 plxReg = PlxRegisterRead( theMaster -> hdle , 0x38 , &rc ) ;
-  idMapIterator idIt = idMap.find( theMaster ) ;
-  unsigned int id = idIt -> second ;
+  unsigned int id = theMaster -> masterID ;
   
   U8 isMasked = 
     static_cast< U8 >( ( ( ( ( 0x1 << ( ( id - 1 ) + 12 ) ) ) & 
@@ -2988,8 +2959,7 @@ SpecsError checkSlaveIt( SPECSSLAVE * theSlave ) {
   // First do the polling
   bool gotIt = false ;
   bool dontReset = false ;
-  idMapIterator idIt = idMap.find( theSlave -> pSpecsmaster ) ;// MTQ
-  unsigned int id = idIt -> second ;// MTQ
+  unsigned int id = theSlave -> pSpecsmaster -> masterID  ;// MTQ
   // NOuveau code par MTQ le 25/4/14
   int state;
   U32 address , itType ;
@@ -3036,7 +3006,7 @@ SpecsError checkSlaveIt( SPECSSLAVE * theSlave ) {
 
       // Check if it is the same Master
       if ( globalReg & 
-           ( 0x1000000 << ( 2 * ( idMap[ theSlave -> pSpecsmaster ] - 1 )))) {
+           ( 0x1000000 << ( 2 * ( theSlave -> pSpecsmaster -> masterID - 1 )))) {
         gotIt = true ;
       }
       else { 
@@ -3051,7 +3021,7 @@ SpecsError checkSlaveIt( SPECSSLAVE * theSlave ) {
       U16 intVect ;
       // Read IT Type
       if ( globalReg & 
-           ( 0x1000000 << (1+2 * ( idMap[ theSlave -> pSpecsmaster ] - 1)))){
+           ( 0x1000000 << (1+2 * ( theSlave -> pSpecsmaster -> masterID - 1)))){
       
         // Non empty IT
         U32 statusReg ;
@@ -3186,8 +3156,7 @@ SpecsError specs_slave_waitForInterrupt( SPECSSLAVE * theSlave ,
                                          U32 timeOut , 
                                          U16 * ItOut ) 
 {
-  idMapIterator idIt = idMap.find( theSlave -> pSpecsmaster ) ;// MTQ
-  unsigned int id = idIt -> second ;// MTQ
+  unsigned int id = theSlave -> pSpecsmaster -> masterID ;
   (*ItOut) = 0 ;
   SpecsError theError = specsUserCheckParameters( theSlave ) ;
   if ( theError != SpecsSuccess ) return theError ;
@@ -3301,7 +3270,7 @@ SpecsError specs_slave_waitForInterrupt( SPECSSLAVE * theSlave ,
 bool specsCreateSemaphore( bool * semExists , int * semId , 
                            std::string inputKey ,
                            int secondaryKey , int nSem , 
-                           std::map< SPECSMASTER * , int > * theMap , 
+                           std::map< U32 , int > * theMap , 
                            SPECSMASTER * theMasterCard ) {
   key_t theKey = ftok( inputKey.c_str() , secondaryKey ) ;
 
@@ -3316,9 +3285,9 @@ bool specsCreateSemaphore( bool * semExists , int * semId ,
       return false ;
     }
   }
-  
-  std::pair< std::map< SPECSMASTER * , int >::iterator , bool > res = 
-    theMap -> insert( std::make_pair( theMasterCard , *semId ) ) ;
+
+  std::pair< std::map< U32 , int >::iterator , bool > res = 
+    theMap -> insert( std::make_pair( theMasterCard -> masterID , *semId ) ) ;
   if ( ! res.second ) return false ;
   return true ;
 }
