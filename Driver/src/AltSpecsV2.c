@@ -1097,7 +1097,7 @@ static int specs_dev_ioctl(struct inode *inode, struct file *file,
 	
 	do {
 	  iowrite32(0x0000, pReset);
-	  printk(KERN_INFO DRV_NAME " Reset FIFO emssion %d \n",ioctl_param);
+	  printk(KERN_INFO DRV_NAME " Reset FIFO emssion %lu \n",ioctl_param);
 	
 	}while (ioread32 (pReset) != 0 );
 		
