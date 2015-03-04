@@ -798,17 +798,6 @@ static int specs_dev_ioctl(struct inode *inode, struct file *file,
       { 
 	master=MasterList[pBusIop.MasterID];	
 	pBuf32=(u32*)pBusIop.Buffer;
-        // permet d'attendre ici un si au lieu de repasser au niveau user
-	for (i=0; i<10 ;i++){
-	  level1=ioread32 (&master->fifoRecIn_Status->fill_level);
-	  udelay(1);
-	  level2=ioread32 (&master->fifoRecIn_Status->fill_level);
-	  if (level1 ==  level2 )
-	    {
-	      pBuf32[0]=level1;
-	      break;
-	    }
-	}
 	pBuf32[0]= ioread32 (&master->fifoRecIn_Status->fill_level);
 #ifdef DEBUG_SPECS 	
 	printk(KERN_INFO DRV_NAME "FIFO Recep read level =%d event %x Fifo Addr %x\n",ioread32 (&master->fifoRecIn_Status->fill_level),ioread32 (&master->fifoRecIn_Status->event), (pBusIop.Address + OFFSET_FIFO_REC_IN_STATUS));
@@ -893,6 +882,8 @@ static int specs_dev_ioctl(struct inode *inode, struct file *file,
 		  rc=1; 
 		  break;
 		}
+		schedule();
+		rc = 2;
 	      }
 	    
 	    if ( i== 10000){
@@ -1097,8 +1088,9 @@ static int specs_dev_ioctl(struct inode *inode, struct file *file,
 	
 	do {
 	  iowrite32(0x0000, pReset);
+#ifdef DEBUG_SPECS
 	  printk(KERN_INFO DRV_NAME " Reset FIFO emssion %lu \n",ioctl_param);
-	
+#endif	
 	}while (ioread32 (pReset) != 0 );
 		
 	udelay(5);
