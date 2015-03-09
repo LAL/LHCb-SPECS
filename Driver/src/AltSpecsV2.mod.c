@@ -44,6 +44,7 @@ __attribute__((section("__versions"))) = {
 	{ 0xb2fd5ceb, "__put_user_4" },
 	{ 0x42c8de35, "ioremap_nocache" },
 	{ 0xf0fdf6cb, "__stack_chk_fail" },
+	{ 0x1000e51, "schedule" },
 	{ 0x68f7c535, "pci_unregister_driver" },
 	{ 0x2044fa9e, "kmem_cache_alloc_trace" },
 	{ 0x4d7d27b8, "pci_bus_write_config_byte" },
@@ -67,7 +68,7 @@ __attribute__((section(".modinfo"))) =
 
 MODULE_ALIAS("pci:v00001172d00000005sv*sd*bc*sc*i*");
 
-MODULE_INFO(srcversion, "94CD4F6A3540D097DF5B459");
+MODULE_INFO(srcversion, "56E3597C91212056842E8AA");
 
 static const struct rheldata _rheldata __used
 __attribute__((section(".rheldata"))) = {
