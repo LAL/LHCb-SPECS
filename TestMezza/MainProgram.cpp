@@ -292,8 +292,7 @@ int main( int argc , char ** argv ) {
   // Activate Checksum Error
   if ( ( 24 != testNumber ) && ( 14 != testNumber ) && ( testNumber < 41 ) ) {
     specs_register_write( &theSlave , IntDefineVect , ChecksumBit | 
-                          I2CAckInterruptBit | UserInterruptBit ) ;
-    
+                          I2CAckInterruptBit | UserInterruptBit ) ;    
     U16 InterruptVector ;
     specs_register_read( &theSlave , 0x7 , &InterruptVector ) ;
   } else if ( testNumber > 40 ) { 

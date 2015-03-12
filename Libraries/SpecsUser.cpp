@@ -148,8 +148,7 @@ void stopSpecsUser( void ) {
   for (MasterId =0; MasterId<NB_MASTER;MasterId ++)
     if ( 0 != EtatDev[MasterId] ) 
     { 
-      printf(" Close Master %d pointer %d \n",MasterId+1,
-             EtatDev[ MasterId ] );
+      printf(" Close Master %d\n",MasterId+1 );
       specs_master_close( EtatDev[ MasterId ] ) ;
       EtatDev[MasterId]= 0;
     }
@@ -177,8 +176,7 @@ SpecsError reserveMaster_checkRecursive( SPECSMASTER * theMaster ,
         if ( EINTR == errno ) {
           retry = true ;
         } else {
-          printf( "Recursive, calling function %d, master %d \n" , funcFrom , 
-                  theMaster ) ;
+          printf( "Recursive, calling function %d\n" , funcFrom ) ;
           perror("") ; return SpecsMasterLocked ; 
         }
       } 
@@ -2307,19 +2305,27 @@ SpecsError specsUserFIFORead( SPECSMASTER * specsMtr, U32 *specsData,
   if (errorCodeFromLowLevelSpecsLib == ApiSuccess ) 
     theError = SpecsSuccess ; 
   if (errorCodeFromLowLevelSpecsLib == ApiWaitTimeout ) {
+    recursiveLock[ specsMtr -> masterID ] = true ;
     specs_master_softreset( specsMtr ) ;
+    recursiveLock[ specsMtr -> masterID ] = false ;
     theError |= ReadAccessDenied ;
   }
   if (errorCodeFromLowLevelSpecsLib == ApiAccessDenied ) {
+    recursiveLock[ specsMtr -> masterID ] = true ;
     specs_master_softreset( specsMtr ) ;
+    recursiveLock[ specsMtr -> masterID ] = false ;
     theError |= ReadAccessDenied ;
   }
   if (errorCodeFromLowLevelSpecsLib == ApiInvalidData ) {
+    recursiveLock[ specsMtr -> masterID ] = true ;
     specs_master_softreset( specsMtr ) ;
+    recursiveLock[ specsMtr -> masterID ] = false ;
     theError |= ChecksumError ;
   }
   if (errorCodeFromLowLevelSpecsLib == ApiInvalidSize ) {
+    recursiveLock[ specsMtr -> masterID ] = true ;
     specs_master_softreset( specsMtr ) ;
+    recursiveLock[ specsMtr -> masterID ] = false ;
     theError |= InvalidBufferSize ; 
   }
 
@@ -2327,19 +2333,25 @@ SpecsError specsUserFIFORead( SPECSMASTER * specsMtr, U32 *specsData,
   if (iheader!=specsData[0]) {
     // pb ds le header il n est pas la bonne position 
     // on essaye eventuellement de relire
+    recursiveLock[ specsMtr -> masterID ] = true ;
     specs_master_softreset( specsMtr ) ;
+    recursiveLock[ specsMtr -> masterID ] = false ;
     theError |= NoFrameSeparator ;
   }
   if (specsData[0]==specsData[1]) {
     // header repete 2 fois. 
     // on essaye eventuellement de relire
+    recursiveLock[ specsMtr -> masterID ] = true ;
     specs_master_softreset( specsMtr ) ;
+    recursiveLock[ specsMtr -> masterID ] = false ;
     theError |= FrameSeparatorRepetition ;
   }
   if (specsData[1]==specsData[2]) {
     // le 2eme mot est egal au 3eme 
     // on essaye eventuellement de relire
+    recursiveLock[ specsMtr -> masterID ] = true ;
     specs_master_softreset( specsMtr ) ;
+    recursiveLock[ specsMtr -> masterID ] = false ;
     theError |= HeaderRepetition ; 
   }
  
