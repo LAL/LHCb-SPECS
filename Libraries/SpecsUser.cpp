@@ -1492,7 +1492,6 @@ SpecsError specs_master_close( SPECSMASTER * theMasterCard )
   if ( EtatDev[ theMasterCard -> masterID ] == 0 ) return InvalidParameter;
 
   mutexMap.erase( theMasterCard -> masterID ) ;
-  intEventMap.erase( theMasterCard -> masterID ) ;
 
   // MTQ il n'y a pas de serial number int serId = specs_master_serialNumber( theMasterCard ) ;
   
