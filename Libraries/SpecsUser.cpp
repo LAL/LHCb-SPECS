@@ -1158,6 +1158,8 @@ SpecsError specs_slave_external_reset(  SPECSSLAVE * theSlave ) {
   if ( theError != SpecsSuccess ) return theError ;
 
   recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
+  U8 dcu_mode ; // 0 for HIR, 1 for LIR
+  theError = specs_dcu_read_mode( theSlave , &dcu_mode ) ;
   theError = 
     specs_register_write( theSlave , MezzaCtrlReg , resetOn ) ;
   recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
@@ -1172,6 +1174,11 @@ SpecsError specs_slave_external_reset(  SPECSSLAVE * theSlave ) {
   recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
   theError =  
     specs_register_write( theSlave , MezzaCtrlReg , resetOff ) ;
+  if ( 1 == dcu_mode )
+    specs_dcu_set_LIR( theSlave ) ;
+  else
+    specs_dcu_set_HIR( theSlave ) ;
+   
   recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
 
   theError |= releaseMaster( theSlave -> pSpecsmaster ) ;
@@ -1192,6 +1199,8 @@ SpecsError specs_slave_external_shortreset(  SPECSSLAVE * theSlave ) {
   if ( theError != SpecsSuccess ) return theError ;
 
   recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
+  U8 dcu_mode ;
+  theError = specs_dcu_read_mode( theSlave , &dcu_mode ) ;
   theError = 
     specs_register_write( theSlave , MezzaCtrlReg , resetOn ) ;
   recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
@@ -1204,6 +1213,11 @@ SpecsError specs_slave_external_shortreset(  SPECSSLAVE * theSlave ) {
   recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
   theError =  
     specs_register_write( theSlave , MezzaCtrlReg , resetOff ) ;
+  if( 1 == dcu_mode ) 
+    specs_dcu_set_LIR( theSlave ) ;
+  else
+    specs_dcu_set_HIR( theSlave ) ;
+  
   recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
 
   theError |= releaseMaster( theSlave -> pSpecsmaster ) ;
