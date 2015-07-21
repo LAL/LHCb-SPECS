@@ -39,8 +39,8 @@ extern int errno ;
 #include "AltSpecsV2.h"
 #define GLOBAL_REG PIO_STATUS_REG
 // Version of the library
-#define SpecsUserMajorVersion 13
-#define SpecsUserMinorVersion 4
+#define SpecsUserMajorVersion 14
+#define SpecsUserMinorVersion 1
 
 static struct timespec LockDelay = { 3 , 0 } ;
 
@@ -117,9 +117,6 @@ std::map< U32 , bool > recursiveLock ;
 std::map< U32 , int > mutexMap ;
 typedef std::map< U32 , int >::iterator mutexMapIterator ;
 
-// Map to contain IT2 events for each master
-std::map< U32 , PLX_NOTIFY_OBJECT > intEventMap ;
-typedef std::map< U32 , PLX_NOTIFY_OBJECT >::iterator intEventMapIterator ;
 
 PLX_INTR IntSources ;
   
@@ -127,13 +124,16 @@ static void startSpecsUser(void) __attribute__ ((constructor));
 static void stopSpecsUser(void) __attribute__ ((destructor));
 void stopSpecsUser_signal( int s ) ;
 void startSpecsUser(void) {
-  intEventMap.clear() ;
 
   memset( &IntSources , 0 , sizeof( PLX_INTR ) ) ;
   // MTQ N'est plus utilise    IntSources.IopToPciInt_2 = 1 ;
   //  IntSources.PIO_Line =0x01000008;
   IntSources.PIO_Line =0x01;
   signal( SIGINT , stopSpecsUser_signal ) ;
+  signal( SIGKILL , stopSpecsUser_signal ) ;
+  signal( SIGTERM , stopSpecsUser_signal ) ;
+  signal( SIGSTOP , stopSpecsUser_signal ) ;
+  atexit( stopSpecsUser ) ;
 }
 
 void stopSpecsUser_signal( int s ) 
@@ -144,11 +144,9 @@ void stopSpecsUser_signal( int s )
 
 void stopSpecsUser( void ) {
   int MasterId;
- 
   for (MasterId =0; MasterId<NB_MASTER;MasterId ++)
     if ( 0 != EtatDev[MasterId] ) 
     { 
-      printf(" Close Master %d\n",MasterId+1 );
       specs_master_close( EtatDev[ MasterId ] ) ;
       EtatDev[MasterId]= 0;
     }
@@ -1171,7 +1169,7 @@ SpecsError specs_slave_external_reset(  SPECSSLAVE * theSlave ) {
 
   recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
   theError =  
-    specs_register_write( theSlave , MezzaCtrlReg , resetOff ) ;
+    specs_register_write( theSlave , MezzaCtrlReg , resetOff ) ;   
   recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
 
   theError |= releaseMaster( theSlave -> pSpecsmaster ) ;
@@ -1203,7 +1201,7 @@ SpecsError specs_slave_external_shortreset(  SPECSSLAVE * theSlave ) {
 
   recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
   theError =  
-    specs_register_write( theSlave , MezzaCtrlReg , resetOff ) ;
+    specs_register_write( theSlave , MezzaCtrlReg , resetOff ) ;  
   recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = false ;
 
   theError |= releaseMaster( theSlave -> pSpecsmaster ) ;
@@ -1348,6 +1346,7 @@ SpecsError specs_master_open( DEVICE_INVENT theDevice ,
   // Verifie que le master id est compris entre 1 et 4
   if ( ( MasterId < 0 ) || ( MasterId >= NB_MASTER ) ) return WrongDeviceInfo ;
  
+
   // PlxHandle = EtatDev[MasterId];
  
   // MTQ int serId ;
@@ -1378,18 +1377,6 @@ SpecsError specs_master_open( DEVICE_INVENT theDevice ,
 
   std::ostringstream outputStream ;
   
-  // Add interrupt event maps
-  PLX_NOTIFY_OBJECT Event ;
-
-  rc = PlxNotificationRegisterFor( theMasterCard -> hdle , 
-                                   &IntSources ,MasterId);
-  //MTQ                                  &IntSources , &Event ) ;
- 
-  if ( rc != ApiSuccess ) return WrongDeviceInfo ;
-  std::pair< intEventMapIterator , bool > resEv = 
-    intEventMap.insert( std::make_pair( theMasterCard -> masterID , Event ) ) ;
-  if ( ! resEv.second ) return WrongDeviceInfo ;
-
   bool semExists = true ;
   int semId = 0 ;
   outputStream.str( "" ) ;
@@ -1461,7 +1448,7 @@ SpecsError specs_master_open( DEVICE_INVENT theDevice ,
   operation.sem_op  = 1 ;
   operation.sem_flg = SEM_UNDO ;
   semop( semId , &operation , 1 ) ;
-
+  
   return specs_master_softreset( theMasterCard ) ;
 }
 
@@ -1493,16 +1480,9 @@ SpecsError specs_master_close( SPECSMASTER * theMasterCard )
 
   mutexMap.erase( theMasterCard -> masterID ) ;
 
-  // MTQ il n'y a pas de serial number int serId = specs_master_serialNumber( theMasterCard ) ;
-  
   rc = SpecsmasterEnd(theMasterCard);
  
   if (rc != ApiSuccess) return InvalidParameter;  
-
-  //MTQ PlxNotificationCancel(PlxHdle,&intEventMap[theMasterCard]); a revoir s'il faut faire un close l'un apres l'autre
-  PlxNotificationCancel(PlxHdle,0);
-  memset(&intEventMap[theMasterCard->masterID],0,sizeof(PLX_NOTIFY_OBJECT));
-  intEventMap.erase( theMasterCard -> masterID ) ;
 
   // Ferme le Plx Device. S'il y a encore des masters ouverts
   // a ce moment-la, ca ne fait rien.
