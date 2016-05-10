@@ -1165,7 +1165,7 @@ SpecsError specs_slave_external_reset(  SPECSSLAVE * theSlave ) {
     return theError ;
   }
   
-  usleep( 1000 ) ;
+  usleep( 50000 ) ;
 
   recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
   theError =  
