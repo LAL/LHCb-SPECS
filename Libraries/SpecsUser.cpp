@@ -40,7 +40,7 @@ extern int errno ;
 #define GLOBAL_REG PIO_STATUS_REG
 // Version of the library
 #define SpecsUserMajorVersion 14
-#define SpecsUserMinorVersion 1
+#define SpecsUserMinorVersion 2
 
 static struct timespec LockDelay = { 3 , 0 } ;
 
@@ -1165,7 +1165,7 @@ SpecsError specs_slave_external_reset(  SPECSSLAVE * theSlave ) {
     return theError ;
   }
   
-  usleep( 1000 ) ;
+  usleep( 50000 ) ;
 
   recursiveLock[ theSlave -> pSpecsmaster -> masterID ] = true ;
   theError =  
